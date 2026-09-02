@@ -1,6 +1,6 @@
 # ARK-BOT Quadruped Robot Controller
 
-High-performance quadruped robot controller firmware built for the **Seeed Studio XIAO ESP32-C6** with **PCA9685 16-Channel I2C PWM Servo Driver**, **0.96" SSD1306 OLED Display**, **LEDC Buzzer**, and an embedded **Wi-Fi 6 Web UI**.
+High-performance quadruped robot controller firmware built for the **Seeed Studio XIAO ESP32-C6** with **PCA9685 16-Channel I2C PWM Servo Driver**, **0.96" SSD1306 OLED Display**, **LEDC Buzzer**, **Switchable Internal/External Antenna**, and an embedded **Wi-Fi 6 Web UI**.
 
 > **Migration Note**: This codebase modernizes the original Arduino Nano (Regis Hsu) design. Instead of driving servos directly from GPIO pins D2–D13 with `Servo.h`, all 12 servos now connect to the dedicated **PCA9685 I2C driver** (powered at 5V/6V), controlled by the **XIAO ESP32-C6**.
 
@@ -51,6 +51,18 @@ To make upgrading from the Arduino Nano seamless, each servo connects to the **P
 | **I2C SDA** | `D4` | `GPIO 22` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
 | **I2C SCL** | `D5` | `GPIO 23` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
 | **Buzzer** | `D3` | `GPIO 21` | Passive Buzzer (Expansion Board) |
+| **RF Switch Power** | — | `GPIO 3` | Onboard RF Switch Power Enable (Active LOW) |
+| **Antenna Select** | — | `GPIO 14` | LOW = Onboard Ceramic, HIGH = External U.FL/IPEX |
+
+---
+
+## RF Antenna Selection (Internal Ceramic vs. External IPEX)
+
+The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF switch:
+* **Internal Antenna (`📡 Int`)**: Uses the onboard ceramic antenna.
+* **External Antenna (`🛰️ Ext`)**: Routes RF signals through the U.FL / IPEX antenna connector for extended range.
+* **Persistent Storage**: Selected antenna preference is automatically saved to Non-Volatile Storage (NVS) and restored upon reboot.
+* **Live Telemetry**: Real-time RSSI signal strength (dBm) is reported on the Web UI and OLED dashboard.
 
 ---
 
@@ -61,8 +73,11 @@ To make upgrading from the Arduino Nano seamless, each servo connects to the **P
 3. Open browser:
    - Direct: [`http://arkbot.local`](http://arkbot.local)
    - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx`).
-4. **Interactive 2D Visual Simulation**: Shows real-time animated limb motion as sliders are adjusted.
-5. **Servo Power Controls**:
+4. **Antenna Controls**: Toggle between `📡 Int` (Internal Ceramic) and `🛰️ Ext` (External IPEX) with live RSSI display.
+5. **Interactive 3D / 2D Visual Simulation**:
+   - `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives.
+   - Smooth mechanical LERP animation with floor shadows and ground contact feedback.
+6. **Servo Power Controls**:
    - `⚡ Start All Servos`: Energizes all 12 PWM channels.
    - `🛑 Stop All (Release)`: Sets PWM duty cycle to 0, allowing you to freely adjust horns by hand without motor strain or heat.
    - Per-leg and individual joint `ON / OFF` power switches.

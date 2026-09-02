@@ -30,12 +30,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     body { background-color: var(--bg); color: var(--text-main); padding: 12px; max-width: 1000px; margin: 0 auto; padding-bottom: 50px; }
     
     /* Header */
-    header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--card-bg); border-radius: 14px; border: 1px solid var(--card-border); margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--card-bg); border-radius: 14px; border: 1px solid var(--card-border); margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); flex-wrap: wrap; gap: 12px; }
     .brand { display: flex; align-items: center; gap: 14px; }
     .brand-logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 0 10px var(--cyan-glow)); transition: transform 0.25s ease, filter 0.25s ease; cursor: pointer; }
     .brand-logo:hover { transform: scale(1.08) rotate(3deg); filter: drop-shadow(0 0 18px rgba(0, 240, 255, 0.9)); }
     .title h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.8px; background: linear-gradient(90deg, #ffffff, var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     .title p { font-size: 11px; color: var(--text-dim); }
+    
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    
+    /* RF Antenna Widget */
+    .rf-widget { display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.35); padding: 4px 8px; border-radius: 10px; border: 1px solid var(--card-border); }
+    .rf-label { font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .rf-btns { display: flex; gap: 3px; }
+    .rf-btn { background: #182236; border: 1px solid rgba(255,255,255,0.06); color: var(--text-dim); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }
+    .rf-btn:hover { color: #fff; border-color: var(--cyan); }
+    .rf-btn.active { background: linear-gradient(135deg, var(--cyan), var(--accent)); color: #000; font-weight: 800; border: none; box-shadow: 0 0 10px var(--cyan-glow); }
+    .rssi-badge { font-size: 10px; font-weight: 700; color: #34d399; background: rgba(16, 185, 129, 0.12); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); }
+
     .badge { padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .badge-online { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #059669; box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); }
     .badge-offline { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #dc2626; box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
@@ -128,13 +140,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   <header>
     <div class="brand">
-      <img src="data:image/png;base64,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" class="brand-logo" alt="ARK-BOT Logo">
+      <img src="data:image/png;base64,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" class="brand-logo" alt="ARK-BOT Logo">
       <div class="title">
         <h1>ARK-BOT</h1>
         <p>Cyber Kinematics Engine (ESP32-C6 + PCA9685)</p>
       </div>
     </div>
-    <div id="pcaStatus" class="badge badge-online">PCA: CHECKING</div>
+    
+    <div class="header-right">
+      <!-- Antenna Control -->
+      <div class="rf-widget">
+        <span class="rf-label">Antenna:</span>
+        <div class="rf-btns">
+          <button class="rf-btn active" id="btnAntInt" onclick="setAntenna('internal')" title="Switch to Onboard Ceramic Antenna">📡 Int</button>
+          <button class="rf-btn" id="btnAntExt" onclick="setAntenna('external')" title="Switch to External IPEX/U.FL Antenna">🛰️ Ext</button>
+        </div>
+        <span class="rssi-badge" id="rssiVal">📶 -- dBm</span>
+      </div>
+      
+      <div id="pcaStatus" class="badge badge-online">PCA: CHECKING</div>
+    </div>
   </header>
 
   <!-- Visual Animated Robot Simulation Card -->
@@ -215,82 +240,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     let servoPower = Array(4).fill().map(() => Array(3).fill(true));
     let viewMode = 'iso'; // 'iso', 'top', 'side'
     let waveAnimPhase = 0;
-
-    // Load Bot Logo for Canvas
-    const botLogoImg = new Image();
-    botLogoImg.src = "data:image/png;base64,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" class="brand-logo" alt="ARK-BOT Logo">
-      <div class="title">
-        <h1>ARK-BOT</h1>
-        <p>Cyber Kinematics Engine (ESP32-C6 + PCA9685)</p>
-      </div>
-    </div>
-    <div id="pcaStatus" class="badge badge-online">PCA: CHECKING</div>
-  </header>
-
-  <!-- Visual Animated Robot Simulation Card -->
-  <div class="sim-card">
-    <div class="sim-topbar">
-      <div class="sim-title">
-        <span>⚡ Physical Kinematics View</span>
-      </div>
-      <div class="view-toggles">
-        <button class="view-btn active" id="btnViewIso" onclick="setViewMode('iso')">3D Isometric</button>
-        <button class="view-btn" id="btnViewTop" onclick="setViewMode('top')">Top-Down</button>
-        <button class="view-btn" id="btnViewSide" onclick="setViewMode('side')">Side Elevation</button>
-      </div>
-    </div>
-    
-    <div class="canvas-container">
-      <canvas id="robotCanvas"></canvas>
-    </div>
-
-    <div class="sim-footer">
-      <div class="sim-legend">
-        <div class="legend-item"><span class="legend-dot" style="background:var(--cyan)"></span> Active Joint</div>
-        <div class="legend-item"><span class="legend-dot" style="background:var(--red)"></span> Released (0V)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:var(--green)"></span> Ground Contact</div>
-      </div>
-      <div id="activeCount" style="color:var(--cyan); font-weight:700;">12 / 12 Servos Energized</div>
-    </div>
-  </div>
-
-  <!-- Master Controls -->
-  <div class="section-title">Master Power & Alignment</div>
-  <div class="master-grid">
-    <button class="btn btn-green" onclick="setMasterPower(1)">⚡ Start All Servos</button>
-    <button class="btn btn-red" onclick="setMasterPower(0)">🛑 Stop All (Release)</button>
-    <button class="btn btn-cyan" onclick="sendInit('all')">🎯 Center All (90°)</button>
-    <button class="btn btn-dark" onclick="sendInit('wave')">🌊 Wave Calibration</button>
-    <button class="btn btn-dark" onclick="sendBeep()">🔔 Beep Buzzer</button>
-  </div>
-
-  <!-- 4 Leg Control Cards -->
-  <div class="section-title">Individual Leg & Joint Controls</div>
-  <div class="legs-grid">
-    <div class="leg-card" id="legCard0"></div>
-    <div class="leg-card" id="legCard1"></div>
-    <div class="leg-card" id="legCard2"></div>
-    <div class="leg-card" id="legCard3"></div>
-  </div>
-
-  <div id="toast">Command Sent</div>
-
-  <script>
-    const LEGS = ["Front-Right (FR)", "Front-Left (FL)", "Rear-Right (RR)", "Rear-Left (RL)"];
-    const SHORT_LEGS = ["FR", "FL", "RR", "RL"];
-    const JOINTS = ["Coxa (Hip)", "Femur (Thigh)", "Tibia (Calf)"];
-    const CHANNELS = [
-      [4, 2, 3],    // FR: Coxa CH4, Femur CH2, Tibia CH3
-      [10, 8, 9],   // FL: Coxa CH10, Femur CH8, Tibia CH9
-      [7, 5, 6],    // RR: Coxa CH7, Femur CH5, Tibia CH6
-      [12, 11, 13]  // RL: Coxa CH12, Femur CH11, Tibia CH13
-    ];
-    
-    let targetAngles = Array(4).fill().map(() => Array(3).fill(90));
-    let currentSimAngles = Array(4).fill().map(() => Array(3).fill(90));
-    let servoPower = Array(4).fill().map(() => Array(3).fill(true));
-    let viewMode = 'iso'; // 'iso', 'top', 'side'
-    let waveAnimPhase = 0;
+    let isExternalAntenna = false;
 
     // Load Bot Logo for Canvas
     const botLogoImg = new Image();
@@ -389,6 +339,33 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         setJoint(leg, j, 90);
       }
       showToast(`Initialized Leg ${SHORT_LEGS[leg]} (all 3 joints 90°)`);
+    }
+
+    async function setAntenna(type) {
+      showToast(`Switching to ${type.toUpperCase()} Antenna...`);
+      try {
+        const res = await fetch(`/api/antenna?type=${type}`, { method: 'POST' });
+        const data = await res.json();
+        updateAntennaUI(data.extAntenna, data.rssi);
+        showToast(`Antenna switched: ${data.extAntenna ? 'EXTERNAL (IPEX)' : 'INTERNAL (Ceramic)'}`);
+      } catch (err) {
+        console.error("Antenna API error", err);
+      }
+    }
+
+    function updateAntennaUI(isExt, rssi) {
+      isExternalAntenna = isExt;
+      const btnInt = document.getElementById('btnAntInt');
+      const btnExt = document.getElementById('btnAntExt');
+      const rssiBadge = document.getElementById('rssiVal');
+      
+      if (btnInt && btnExt) {
+        btnInt.className = isExt ? 'rf-btn' : 'rf-btn active';
+        btnExt.className = isExt ? 'rf-btn active' : 'rf-btn';
+      }
+      if (rssiBadge && rssi !== undefined) {
+        rssiBadge.innerText = `📶 ${rssi} dBm`;
+      }
     }
 
     async function setMasterPower(state) {
@@ -537,6 +514,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           badge.innerText = "PCA: MISSING";
         }
 
+        if (data.extAntenna !== undefined) {
+          updateAntennaUI(data.extAntenna, data.rssi);
+        }
+
         if (data.angles && !throttleTimer) {
           updateUIWithState(data.angles, data.enabled);
         }
@@ -616,7 +597,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       ctx.fillStyle = "rgba(0, 240, 255, 0.6)";
       ctx.fillText(`VIEW: ${viewMode.toUpperCase()}`, 14, 18);
       ctx.fillText(`CALIBRATION: 90° NEUTRAL`, 14, 30);
-      ctx.fillText(`SERVO DRIVER: PCA9685`, w - 130, 18);
+      ctx.fillText(`ANT: ${isExternalAntenna ? 'EXT (IPEX)' : 'INT (CERAMIC)'}`, w - 145, 18);
       ctx.restore();
 
       // Physical Robot Dimensions (in simulated mm / units)
@@ -629,10 +610,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const tibiaLength = 52;  // Shin length
 
       // 4 Hip Base Mounts on Body Corners:
-      // Index 0: FR (Front-Right) -> x > 0 (Right), y < 0 (Front)
-      // Index 1: FL (Front-Left)  -> x < 0 (Left),  y < 0 (Front)
-      // Index 2: RR (Rear-Right)  -> x > 0 (Right), y > 0 (Rear)
-      // Index 3: RL (Rear-Left)   -> x < 0 (Left),  y > 0 (Rear)
       const legMounts = [
         { name: "FR", x: bodyHalfW,  y: -bodyHalfL, sideX: 1,  frontY: -1 },
         { name: "FL", x: -bodyHalfW, y: -bodyHalfL, sideX: -1, frontY: -1 },
@@ -643,13 +620,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       // Perspective Projection Function
       function projectPoint(x, y, z) {
         if (viewMode === 'top') {
-          // Pure 2D Top-Down Footprint view
           return { x: cx + x * 1.15, y: cy + y * 1.15 };
         } else if (viewMode === 'side') {
-          // Pure 2D Side Elevation Profile view (Front on Left, Rear on Right)
           return { x: cx + y * 1.15, y: cy - (z - bodyElevZ) * 1.15 };
         } else {
-          // 3D Isometric View (True 3D Spatial Geometry)
           const isoX = (x - y * 0.5) * 1.0;
           const isoY = (x * 0.28 + y * 0.58) - (z - bodyElevZ) * 0.95;
           return { x: cx + isoX, y: cy + isoY };

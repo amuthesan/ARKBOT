@@ -5,7 +5,7 @@
 #include <Adafruit_PWMServoDriver.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
+#include <Preferences.h>
 #include <ESPmDNS.h>
 
 #include "config.h"
@@ -15,6 +15,7 @@
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDRESS);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 WebServer server(80);
+Preferences preferences;
 
 // State tracking
 int currentAngles[NUM_LEGS][SERVOS_PER_LEG];
@@ -22,6 +23,7 @@ bool servoEnabled[NUM_LEGS][SERVOS_PER_LEG];
 bool oledReady = false;
 bool pcaReady = false;
 bool wifiStaConnected = false;
+bool useExternalAntenna = false;
 String activeIp = "192.168.4.1";
 String currentMode = "ALL @ 90deg";
 
@@ -30,11 +32,41 @@ void playStepChime();
 void playReadyChime();
 void playBootChime();
 void playErrorChime();
+void setAntenna(bool external, bool persist);
 void setLegJointAngle(int leg, int joint, int angle);
 void setServoPower(int leg, int joint, bool enable);
 void setMasterPower(bool enable);
 void setLegPower(int leg, bool enable);
 void calibrateAllServos(bool sequential);
+
+// ==========================================
+// Seeed Studio XIAO ESP32-C6 Antenna Control
+// ==========================================
+void initAntenna() {
+    preferences.begin("ark_rf", false);
+    useExternalAntenna = preferences.getBool("ext_ant", DEFAULT_EXT_ANT);
+    setAntenna(useExternalAntenna, false);
+}
+
+void setAntenna(bool external, bool persist = true) {
+    // GPIO3: Enable RF switch (Active LOW)
+    pinMode(ANT_PWR_PIN, OUTPUT);
+    digitalWrite(ANT_PWR_PIN, LOW);
+    delay(10);
+
+    // GPIO14: LOW = Internal Ceramic, HIGH = External U.FL/IPEX
+    pinMode(ANT_SEL_PIN, OUTPUT);
+    digitalWrite(ANT_SEL_PIN, external ? HIGH : LOW);
+    useExternalAntenna = external;
+
+    if (persist) {
+        preferences.putBool("ext_ant", external);
+    }
+
+    Serial.printf("[RF] Active Antenna: %s (GPIO14=%s)\n", 
+        external ? "EXTERNAL (U.FL / IPEX)" : "INTERNAL (Ceramic)", 
+        external ? "HIGH" : "LOW");
+}
 
 // ==========================================
 // Buzzer Audio Feedback Helpers (LEDC PWM)
@@ -160,10 +192,11 @@ void drawSplashScreen() {
     display.print(F("ARK-BOT ROBOT"));
 
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(4, 20);
+    display.setCursor(4, 18);
     display.println(F("XIAO ESP32-C6 (WiFi 6)"));
-    display.setCursor(4, 32);
-    display.println(F("Visual Calibrator"));
+    display.setCursor(4, 30);
+    display.print(F("Ant: "));
+    display.println(useExternalAntenna ? F("External (IPEX)") : F("Internal Ceramic"));
     
     display.drawRect(4, 48, 120, 10, SSD1306_WHITE);
     display.fillRect(6, 50, 60, 6, SSD1306_WHITE);
@@ -242,7 +275,7 @@ void updateCalibrationProgress(int leg, int joint, int progressPercent) {
     display.display();
 }
 
-void drawMainDashboard(bool heartbeat, bool showIpCycle) {
+void drawMainDashboard(bool heartbeat, int cycleIndex) {
     if (!oledReady) return;
     display.clearDisplay();
 
@@ -285,13 +318,21 @@ void drawMainDashboard(bool heartbeat, bool showIpCycle) {
     display.drawFastHLine(0, 52, SCREEN_WIDTH, SSD1306_WHITE);
     display.setCursor(0, 55);
     
-    // Bottom banner cycles between Mode and WebUI IP address
-    if (showIpCycle) {
+    // Bottom banner cycles: 0 = IP, 1 = Mode, 2 = Antenna & Signal
+    if (cycleIndex == 0) {
         display.print(F("IP: "));
         display.print(activeIp);
-    } else {
+    } else if (cycleIndex == 1) {
         display.print(F("MD: "));
         display.print(currentMode);
+    } else {
+        display.print(useExternalAntenna ? F("ANT:EXT ") : F("ANT:INT "));
+        if (wifiStaConnected) {
+            display.print(WiFi.RSSI());
+            display.print(F("dBm"));
+        } else {
+            display.print(F("AP"));
+        }
     }
 
     display.display();
@@ -335,7 +376,7 @@ void calibrateAllServos(bool sequential) {
     currentMode = "ALL @ 90deg";
     playReadyChime();
     Serial.println(F("[SUCCESS] All 12 servos calibrated at 90 deg neutral position."));
-    drawMainDashboard(true, false);
+    drawMainDashboard(true, 0);
 }
 
 // ==========================================
@@ -351,6 +392,8 @@ void handleStatus() {
     json += "\"pcaReady\":" + String(pcaReady ? "true" : "false") + ",";
     json += "\"mode\":\"" + currentMode + "\",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
+    json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
+    json += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
     
     // Angles matrix
     json += "\"angles\":[";
@@ -380,6 +423,22 @@ void handleStatus() {
 
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", json);
+}
+
+void handleSetAntenna() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (!server.hasArg("type")) {
+        server.send(400, "application/json", "{\"error\":\"Missing 'type' parameter ('internal' or 'external')\"}");
+        return;
+    }
+
+    String type = server.arg("type");
+    bool isExt = (type.equalsIgnoreCase("external") || type == "1" || type.equalsIgnoreCase("ext"));
+    setAntenna(isExt, true);
+    playStepChime();
+
+    String resp = "{\"success\":true,\"extAntenna\":" + String(isExt ? "true" : "false") + ",\"rssi\":" + String(WiFi.RSSI()) + "}";
+    server.send(200, "application/json", resp);
 }
 
 void handleSetServo() {
@@ -460,7 +519,10 @@ void setup() {
     // Initialize buzzer with ESP32 LEDC PWM
     initBuzzer();
 
-    delay(500);
+    // Initialize Seeed Studio XIAO ESP32-C6 RF Antenna configuration
+    initAntenna();
+
+    delay(400);
     Serial.println(F("\n=========================================="));
     Serial.println(F("         ARK-BOT QUADRUPED SYSTEM         "));
     Serial.println(F("    Visual Calibrator (ESP32-C6 + PCA)    "));
@@ -488,6 +550,8 @@ void setup() {
         wifiStaConnected = true;
         activeIp = WiFi.localIP().toString();
         Serial.printf("[OK] Connected to %s!\n", WIFI_STA_SSID);
+        Serial.printf("[OK] Active Antenna: %s, RSSI: %d dBm\n", 
+            useExternalAntenna ? "EXTERNAL" : "INTERNAL", WiFi.RSSI());
         Serial.print(F("[OK] Home Web UI URL: http://"));
         Serial.println(activeIp);
     } else {
@@ -507,6 +571,7 @@ void setup() {
     // 2. Configure Web Server Routes
     server.on("/", HTTP_GET, handleRoot);
     server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/antenna", HTTP_POST, handleSetAntenna);
     server.on("/api/servo", HTTP_POST, handleSetServo);
     server.on("/api/power", HTTP_POST, handlePower);
     server.on("/api/init", HTTP_POST, handleInit);
@@ -555,7 +620,9 @@ void loop() {
     if (millis() - lastUpdate >= 500) {
         lastUpdate = millis();
         blinkState = !blinkState;
-        cycleCounter = (cycleCounter + 1) % 6; // Toggle IP vs Mode every 3 seconds
+        cycleCounter = (cycleCounter + 1) % 9; // Cycle bottom line every 1.5s (0,1,2, 3,4,5, 6,7,8)
+
+        int cycleIndex = cycleCounter / 3; // 0 = IP, 1 = Mode, 2 = Antenna & RSSI
 
         if (pcaReady) {
             // Verify PCA9685 is still connected
@@ -565,7 +632,7 @@ void loop() {
                 playErrorChime();
                 drawPcaMissingScreen(true);
             } else {
-                drawMainDashboard(blinkState, cycleCounter >= 3);
+                drawMainDashboard(blinkState, cycleIndex);
             }
         } else {
             // PCA not ready: probe I2C 0x40 for hot-plug reconnection
@@ -574,7 +641,7 @@ void loop() {
                 if (initPCA9685()) {
                     pcaReady = true;
                     calibrateAllServos(true);
-                    drawMainDashboard(true, false);
+                    drawMainDashboard(true, 0);
                 }
             } else {
                 drawPcaMissingScreen(blinkState);

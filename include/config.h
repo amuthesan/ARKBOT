@@ -6,7 +6,7 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v2.0"
+#define ROBOT_VERSION     "v0.1.1"
 
 // ==========================================
 // Wi-Fi Configuration (Home Station + SoftAP Fallback)
@@ -19,6 +19,15 @@
 #define WIFI_AP_PASS       "12345678"   // Minimum 8 characters
 #define WIFI_AP_CHANNEL    1
 #define WIFI_MAX_CONN      4
+
+// ==========================================
+// Seeed Studio XIAO ESP32-C6 RF Antenna Control
+// ==========================================
+// GPIO 3: RF Switch Power Enable (active LOW to activate switch circuit)
+// GPIO 14: Antenna Selector (LOW = Internal Ceramic Antenna, HIGH = External U.FL/IPEX)
+#define ANT_PWR_PIN        3
+#define ANT_SEL_PIN        14
+#define DEFAULT_EXT_ANT    false
 
 // ==========================================
 // Hardware Pin & I2C Definitions

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [v0.1.1] - 2026-09-02
 
 ### Added
+- **Seeed Studio XIAO ESP32-C6 RF Antenna Switching**:
+  - Software-controlled RF switch via GPIO 3 (Power Enable) and GPIO 14 (Antenna Select).
+  - Runtime toggle between **Internal Ceramic Antenna** and **External U.FL / IPEX Antenna** directly from Web UI header.
+  - Persistent NVS storage for antenna preference across power cycles.
+  - Live RSSI (dBm) signal strength reporting in Web UI and OLED cycling display.
 - **Hardware Architecture Modernization**:
   - Migrated core controller from Arduino Nano to **Seeed Studio XIAO ESP32-C6** (160MHz RISC-V, Wi-Fi 6, BLE 5).
   - Integrated **PCA9685 16-Channel I2C PWM Servo Driver** for dedicated 5V/6V servo power and jitter-free pulse generation.
@@ -30,9 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Native ESP32 LEDC PWM buzzer driver on pin `D3` (`GPIO 21`) with melodic boot, step tick, completion, and warning chimes.
   - 0.96" SSD1306 OLED display dashboard showing live angle matrix, heartbeat indicator, mode, and assigned IP address.
   - Hardware probing for PCA9685 at boot and runtime with dedicated OLED alert screen and auto-reconnect recovery.
-- **Brand Assets**:
+- **Brand Assets & Developer Attribution**:
   - Processed and generated high-DPI transparent white and black brand logos ($128\times128$ and $256\times256$).
   - Embedded glowing brand logo in Web UI header navigation and central robot chassis reactor plate.
+  - Added engineering credit footer for Amuthesan / Ark Technology.
 
 ### Changed
 - Rebranded project from **UAZ** to **ARK-BOT**.
