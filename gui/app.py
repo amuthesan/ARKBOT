@@ -6,13 +6,15 @@ Locomotion Commander, Servo Calibrator, and Real-time Telemetry.
 """
 
 import sys
+import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QTabWidget, QComboBox, QLineEdit, QPushButton,
     QLabel, QStatusBar, QFrame, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QIcon, QPixmap
+
 
 from telemetry_client import TelemetryWorker, ConnectionState, list_serial_ports
 from viewport_3d import Viewport3D
@@ -199,6 +201,13 @@ class MainWindow(QMainWindow):
         self.resize(1280, 820)
         self.setStyleSheet(CYBER_QSS)
 
+        # Set Window Icon using product logo
+        logo_icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo", "logo_white_256.png")
+        if not os.path.exists(logo_icon_path):
+            logo_icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo", "White.png")
+        if os.path.exists(logo_icon_path):
+            self.setWindowIcon(QIcon(logo_icon_path))
+
         # Telemetry Worker Thread
         self.worker = TelemetryWorker(self)
         self.worker.state_changed.connect(self._on_state_changed)
@@ -274,10 +283,29 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(12)
 
-        # Title
-        lbl_title = QLabel("🤖 ARK-BOT")
-        lbl_title.setStyleSheet("font-size: 16px; font-weight: 800; color: #00f0ff; letter-spacing: 1px;")
-        layout.addWidget(lbl_title)
+        # Brand Container (Product Logo + Text)
+        brand_widget = QWidget()
+        brand_widget.setStyleSheet("background: transparent; border: none;")
+        brand_layout = QHBoxLayout(brand_widget)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(8)
+
+        # Product Logo Icon (Vector / Crisp PNG)
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo", "logo_white_128.png")
+        if not os.path.exists(logo_path):
+            logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo", "White.png")
+
+        if os.path.exists(logo_path):
+            lbl_logo = QLabel()
+            lbl_logo.setStyleSheet("background: transparent; border: none;")
+            pix = QPixmap(logo_path).scaled(26, 26, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl_logo.setPixmap(pix)
+            brand_layout.addWidget(lbl_logo)
+
+        lbl_title = QLabel("ARK-BOT")
+        lbl_title.setStyleSheet("font-size: 16px; font-weight: 800; color: #00f0ff; letter-spacing: 1.5px; background: transparent; border: none;")
+        brand_layout.addWidget(lbl_title)
+        layout.addWidget(brand_widget)
 
         # Mode Selector
         self.combo_mode = QComboBox()
