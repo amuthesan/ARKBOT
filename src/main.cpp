@@ -1068,7 +1068,8 @@ void drawSplashScreen() {
 
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(4, 18);
-    display.println(F("Action Commander v1.0.1"));
+    display.print(F("Action Commander "));
+    display.println(ROBOT_VERSION);
     display.setCursor(4, 30);
     display.print(F("Ant: "));
     display.println(useExternalAntenna ? F("External (IPEX)") : F("Internal Ceramic"));
@@ -1086,7 +1087,8 @@ void drawMainDashboard(bool heartbeat, int cycleIndex) {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.print(F("ARK-BOT v1.0.1"));
+    display.print(F("ARK-BOT "));
+    display.print(ROBOT_VERSION);
     if (heartbeat) display.fillCircle(123, 3, 2, SSD1306_WHITE);
     else display.drawCircle(123, 3, 2, SSD1306_WHITE);
     display.drawFastHLine(0, 9, SCREEN_WIDTH, SSD1306_WHITE);

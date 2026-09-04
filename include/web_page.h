@@ -14,7 +14,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ARK-BOT Action Commander | v1.0.1</title>
+  <title>ARK-BOT Action Commander | v1.0.4</title>
   <style>
     :root {
       --bg: #070a0f;
@@ -144,7 +144,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
       <div class="title">
         <h1>ARK-BOT</h1>
-        <p>Cyber Motion Commander (v1.0.1)</p>
+        <p>Cyber Motion Commander (v1.0.4)</p>
       </div>
     </div>
 
@@ -312,7 +312,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.1</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
       </div>
@@ -952,7 +952,7 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.1</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
@@ -1477,7 +1477,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.1</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
