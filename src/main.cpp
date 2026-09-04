@@ -374,7 +374,7 @@ void wait_all_reach() {
 }
 
 bool is_stand() {
-    return (site_now[0][2] <= -85.0f);
+    return (site_now[0][2] <= -70.0f);
 }
 
 // 50Hz FreeRTOS Kinematics Task (replaces Arduino FlexiTimer2)
@@ -406,6 +406,41 @@ void kinematicsTask(void* parameter) {
 // ==========================================
 // Exact Original Gait Routines
 // ==========================================
+// Walking Height State
+float z_stance = Z_WALK_NORMAL;
+float z_swing_up = Z_UP_NORMAL;
+String currentWalkHeight = "normal";
+
+void setWalkingHeight(const String& profile) {
+    if (profile.equalsIgnoreCase("low") || profile.equalsIgnoreCase("crouch")) {
+        currentWalkHeight = "low";
+        z_stance = Z_WALK_LOW;
+        z_swing_up = Z_UP_LOW;
+        currentMode = "HEIGHT: LOW";
+    } else if (profile.equalsIgnoreCase("high") || profile.equalsIgnoreCase("tall")) {
+        currentWalkHeight = "high";
+        z_stance = Z_WALK_HIGH;
+        z_swing_up = Z_UP_HIGH;
+        currentMode = "HEIGHT: HIGH";
+    } else {
+        currentWalkHeight = "normal";
+        z_stance = Z_WALK_NORMAL;
+        z_swing_up = Z_UP_NORMAL;
+        currentMode = "HEIGHT: NORMAL";
+    }
+
+    if (is_stand()) {
+        move_speed = stand_seat_speed;
+        for (int leg = 0; leg < 4; leg++) {
+            set_site(leg, KEEP, KEEP, z_stance);
+        }
+        wait_all_reach();
+    }
+}
+
+// ==========================================
+// Exact Original Gait Routines with Dynamic Stance
+// ==========================================
 void sit() {
     move_speed = stand_seat_speed;
     currentMode = "SITTING";
@@ -420,13 +455,13 @@ void stand() {
     move_speed = stand_seat_speed;
     currentMode = "STANDING";
     for (int leg = 0; leg < 4; leg++) {
-        set_site(leg, KEEP, KEEP, z_default);
+        set_site(leg, KEEP, KEEP, z_stance);
     }
     wait_all_reach();
     currentMode = "STAND";
 }
 
-void stand_high(float target_z = z_high) {
+void stand_high(float target_z = Z_WALK_HIGH) {
     move_speed = stand_seat_speed;
     currentMode = "STAND HIGH";
     for (int leg = 0; leg < 4; leg++) {
@@ -442,49 +477,49 @@ void step_forward(unsigned int step) {
     while (step-- > 0 && !stopRequested) {
         if (site_now[2][1] == y_start) {
             // leg 2&1 move
-            set_site(2, x_default + x_offset, y_start, z_up);
+            set_site(2, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_stance);
             wait_all_reach();
 
             move_speed = body_move_speed;
-            set_site(0, x_default + x_offset, y_start, z_default);
-            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_default);
-            set_site(2, x_default - x_offset, y_start + y_step, z_default);
-            set_site(3, x_default - x_offset, y_start + y_step, z_default);
+            set_site(0, x_default + x_offset, y_start, z_stance);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_stance);
+            set_site(2, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(3, x_default - x_offset, y_start + y_step, z_stance);
             wait_all_reach();
 
             move_speed = leg_move_speed;
-            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(1, x_default + x_offset, y_start, z_up);
+            set_site(1, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(1, x_default + x_offset, y_start, z_default);
+            set_site(1, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         } else {
             // leg 0&3 move
-            set_site(0, x_default + x_offset, y_start, z_up);
+            set_site(0, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_stance);
             wait_all_reach();
 
             move_speed = body_move_speed;
-            set_site(0, x_default - x_offset, y_start + y_step, z_default);
-            set_site(1, x_default - x_offset, y_start + y_step, z_default);
-            set_site(2, x_default + x_offset, y_start, z_default);
-            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(0, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(1, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(2, x_default + x_offset, y_start, z_stance);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_stance);
             wait_all_reach();
 
             move_speed = leg_move_speed;
-            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(3, x_default + x_offset, y_start, z_up);
+            set_site(3, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(3, x_default + x_offset, y_start, z_default);
+            set_site(3, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         }
     }
@@ -497,49 +532,49 @@ void step_back(unsigned int step) {
     while (step-- > 0 && !stopRequested) {
         if (site_now[3][1] == y_start) {
             // leg 3&0 move
-            set_site(3, x_default + x_offset, y_start, z_up);
+            set_site(3, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_stance);
             wait_all_reach();
 
             move_speed = body_move_speed;
-            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_default);
-            set_site(1, x_default + x_offset, y_start, z_default);
-            set_site(2, x_default - x_offset, y_start + y_step, z_default);
-            set_site(3, x_default - x_offset, y_start + y_step, z_default);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_stance);
+            set_site(1, x_default + x_offset, y_start, z_stance);
+            set_site(2, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(3, x_default - x_offset, y_start + y_step, z_stance);
             wait_all_reach();
 
             move_speed = leg_move_speed;
-            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(0, x_default + x_offset, y_start, z_up);
+            set_site(0, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(0, x_default + x_offset, y_start, z_default);
+            set_site(0, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         } else {
             // leg 1&2 move
-            set_site(1, x_default + x_offset, y_start, z_up);
+            set_site(1, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_stance);
             wait_all_reach();
 
             move_speed = body_move_speed;
-            set_site(0, x_default - x_offset, y_start + y_step, z_default);
-            set_site(1, x_default - x_offset, y_start + y_step, z_default);
-            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_default);
-            set_site(3, x_default + x_offset, y_start, z_default);
+            set_site(0, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(1, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_stance);
+            set_site(3, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
 
             move_speed = leg_move_speed;
-            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_up);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_swing_up);
             wait_all_reach();
-            set_site(2, x_default + x_offset, y_start, z_up);
+            set_site(2, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
-            set_site(2, x_default + x_offset, y_start, z_default);
+            set_site(2, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         }
     }
@@ -552,65 +587,65 @@ void turn_left(unsigned int step) {
     while (step-- > 0 && !stopRequested) {
         if (site_now[3][1] == y_start) {
             // leg 3&1 move
-            set_site(3, x_default + x_offset, y_start, z_up);
+            set_site(3, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
 
-            set_site(0, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(1, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(2, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(3, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(0, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(1, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(2, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_swing_up);
             wait_all_reach();
 
-            set_site(3, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(1, turn_x0 + x_offset, turn_y0, z_default);
-            set_site(2, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(3, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(0, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_stance);
+            set_site(2, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(3, turn_x0 - x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(1, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_swing_up);
             wait_all_reach();
 
-            set_site(0, x_default + x_offset, y_start, z_default);
-            set_site(1, x_default + x_offset, y_start, z_up);
-            set_site(2, x_default - x_offset, y_start + y_step, z_default);
-            set_site(3, x_default - x_offset, y_start + y_step, z_default);
+            set_site(0, x_default + x_offset, y_start, z_stance);
+            set_site(1, x_default + x_offset, y_start, z_swing_up);
+            set_site(2, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(3, x_default - x_offset, y_start + y_step, z_stance);
             wait_all_reach();
 
-            set_site(1, x_default + x_offset, y_start, z_default);
+            set_site(1, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         } else {
             // leg 0&2 move
-            set_site(0, x_default + x_offset, y_start, z_up);
+            set_site(0, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
 
-            set_site(0, turn_x0 + x_offset, turn_y0, z_up);
-            set_site(1, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(2, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(3, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_swing_up);
+            set_site(1, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(2, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(3, turn_x1 - x_offset, turn_y1, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(1, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(2, turn_x0 + x_offset, turn_y0, z_default);
-            set_site(3, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(0, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(1, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_stance);
+            set_site(3, turn_x1 + x_offset, turn_y1, z_stance);
             wait_all_reach();
 
-            set_site(2, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_swing_up);
             wait_all_reach();
 
-            set_site(0, x_default - x_offset, y_start + y_step, z_default);
-            set_site(1, x_default - x_offset, y_start + y_step, z_default);
-            set_site(2, x_default + x_offset, y_start, z_up);
-            set_site(3, x_default + x_offset, y_start, z_default);
+            set_site(0, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(1, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(2, x_default + x_offset, y_start, z_swing_up);
+            set_site(3, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
 
-            set_site(2, x_default + x_offset, y_start, z_default);
+            set_site(2, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         }
     }
@@ -623,65 +658,65 @@ void turn_right(unsigned int step) {
     while (step-- > 0 && !stopRequested) {
         if (site_now[2][1] == y_start) {
             // leg 2&0 move
-            set_site(2, x_default + x_offset, y_start, z_up);
+            set_site(2, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
 
-            set_site(0, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(1, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(2, turn_x0 + x_offset, turn_y0, z_up);
-            set_site(3, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(0, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(1, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_swing_up);
+            set_site(3, turn_x1 + x_offset, turn_y1, z_stance);
             wait_all_reach();
 
-            set_site(2, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x0 + x_offset, turn_y0, z_default);
-            set_site(1, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(2, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(3, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_stance);
+            set_site(1, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(2, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(3, turn_x1 - x_offset, turn_y1, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_swing_up);
             wait_all_reach();
 
-            set_site(0, x_default + x_offset, y_start, z_up);
-            set_site(1, x_default + x_offset, y_start, z_default);
-            set_site(2, x_default - x_offset, y_start + y_step, z_default);
-            set_site(3, x_default - x_offset, y_start + y_step, z_default);
+            set_site(0, x_default + x_offset, y_start, z_swing_up);
+            set_site(1, x_default + x_offset, y_start, z_stance);
+            set_site(2, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(3, x_default - x_offset, y_start + y_step, z_stance);
             wait_all_reach();
 
-            set_site(0, x_default + x_offset, y_start, z_default);
+            set_site(0, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         } else {
             // leg 1&3 move
-            set_site(1, x_default + x_offset, y_start, z_up);
+            set_site(1, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
 
-            set_site(0, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(1, turn_x0 + x_offset, turn_y0, z_up);
-            set_site(2, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(3, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(0, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_swing_up);
+            set_site(2, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(3, turn_x0 - x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(1, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(0, turn_x1 - x_offset, turn_y1, z_default);
-            set_site(1, turn_x0 - x_offset, turn_y0, z_default);
-            set_site(2, turn_x1 + x_offset, turn_y1, z_default);
-            set_site(3, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(0, turn_x1 - x_offset, turn_y1, z_stance);
+            set_site(1, turn_x0 - x_offset, turn_y0, z_stance);
+            set_site(2, turn_x1 + x_offset, turn_y1, z_stance);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_stance);
             wait_all_reach();
 
-            set_site(3, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_swing_up);
             wait_all_reach();
 
-            set_site(0, x_default - x_offset, y_start + y_step, z_default);
-            set_site(1, x_default - x_offset, y_start + y_step, z_default);
-            set_site(2, x_default + x_offset, y_start, z_default);
-            set_site(3, x_default + x_offset, y_start, z_up);
+            set_site(0, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(1, x_default - x_offset, y_start + y_step, z_stance);
+            set_site(2, x_default + x_offset, y_start, z_stance);
+            set_site(3, x_default + x_offset, y_start, z_swing_up);
             wait_all_reach();
 
-            set_site(3, x_default + x_offset, y_start, z_default);
+            set_site(3, x_default + x_offset, y_start, z_stance);
             wait_all_reach();
         }
     }
@@ -807,6 +842,12 @@ void actionTask(void* parameter) {
                 stand();
             } else if (act == "sit") {
                 sit();
+            } else if (act == "set_height_low" || act == "height_low" || act == "low" || act == "crouch") {
+                setWalkingHeight("low");
+            } else if (act == "set_height_normal" || act == "height_normal" || act == "normal") {
+                setWalkingHeight("normal");
+            } else if (act == "set_height_high" || act == "height_high" || act == "high_walk") {
+                setWalkingHeight("high");
             } else if (act == "hand_shake" || act == "shake") {
                 if (!is_stand()) stand();
                 hand_shake(req.steps);
@@ -850,6 +891,7 @@ void sendSerialTelemetryJson() {
     s += ",\"version\":\"" ROBOT_VERSION "\"";
     s += ",\"pca\":"; s += (pcaReady ? "true" : "false");
     s += ",\"mode\":\""; s += (pcaReady ? currentMode : "PCA OFFLINE"); s += "\"";
+    s += ",\"walk_height\":\""; s += currentWalkHeight; s += "\"";
     s += ",\"moving\":"; s += ((pcaReady && isActionRunning) ? "true" : "false");
     s += ",\"sites\":[";
     for (int l = 0; l < NUM_LEGS; l++) {
@@ -912,6 +954,19 @@ void parseSerialCommand(const String& cmd) {
                     spd = trimmed.substring(c + 1).toFloat();
                 }
                 executeAction(act, steps, spd);
+                return;
+            }
+        }
+
+        // Walking Height command: {"height":"low"|"normal"|"high"}
+        int hgtIdx = trimmed.indexOf("\"height\"");
+        if (hgtIdx >= 0) {
+            int colon = trimmed.indexOf(':', hgtIdx);
+            int q1 = trimmed.indexOf('"', colon);
+            int q2 = trimmed.indexOf('"', q1 + 1);
+            if (q1 >= 0 && q2 > q1) {
+                String hgt = trimmed.substring(q1 + 1, q2);
+                setWalkingHeight(hgt);
                 return;
             }
         }
@@ -1111,6 +1166,7 @@ void handleStatus() {
     json += "\"pca\":"; json += (pcaReady ? "true" : "false"); json += ",";
     json += "\"pcaReady\":"; json += (pcaReady ? "true" : "false"); json += ",";
     json += "\"mode\":\"" + (pcaReady ? currentMode : "PCA OFFLINE") + "\",";
+    json += "\"walk_height\":\"" + currentWalkHeight + "\",";
     json += "\"moving\":" + String((pcaReady && isActionRunning) ? "true" : "false") + ",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
@@ -1172,8 +1228,12 @@ void handleStatus() {
 
 void handleAction() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (server.hasArg("height")) {
+        setWalkingHeight(server.arg("height"));
+    }
+
     if (!server.hasArg("action")) {
-        server.send(400, "application/json", "{\"error\":\"Missing 'action' parameter\"}");
+        server.send(200, "application/json", "{\"status\":\"ok\",\"walk_height\":\"" + currentWalkHeight + "\"}");
         return;
     }
 

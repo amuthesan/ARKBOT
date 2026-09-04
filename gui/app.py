@@ -24,7 +24,7 @@ CYBER_QSS = """
 QMainWindow, QWidget {
     background-color: #080c14;
     color: #e2e8f0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
 }
 
@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.commander_panel = CommanderPanel()
         self.commander_panel.action_requested.connect(self.worker.send_action)
+        self.commander_panel.height_requested.connect(self.worker.send_walk_height)
 
         self.calibrator_panel = CalibratorPanel()
         self.calibrator_panel.servo_changed.connect(self.worker.send_servo)
@@ -428,7 +429,11 @@ class MainWindow(QMainWindow):
         # 1. Update 3D viewport kinematics target
         self.viewport.update_telemetry(telem)
 
-        # 2. Update panel data
+        # 2. Sync walk height if provided
+        if "walk_height" in telem:
+            self.commander_panel.update_walk_height(telem["walk_height"])
+
+        # 3. Update panel data
         current_tab_idx = self.tabs.currentIndex()
         if current_tab_idx == 1:  # Calibrator tab active
             self.calibrator_panel.update_telemetry(telem)

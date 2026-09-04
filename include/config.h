@@ -6,7 +6,7 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v1.0.3"
+#define ROBOT_VERSION     "v1.0.4"
 
 // ==========================================
 // Quadruped Physical & Kinematics Dimensions (mm)
@@ -22,6 +22,16 @@ const float Z_DEFAULT   = -100.0f;  // Normal standing height
 const float Z_HIGH      = -130.0f;  // High/tall standing height
 const float Z_UP        = -60.0f;   // Swing phase leg lift clearance
 const float Z_BOOT      = Z_ABSOLUTE;
+
+// Locomotion Walking Height Presets
+const float Z_WALK_LOW    = -80.0f;   // Low / Crouch walking height
+const float Z_UP_LOW      = -50.0f;   // Low walking swing lift
+
+const float Z_WALK_NORMAL = -100.0f;  // Normal walking height
+const float Z_UP_NORMAL   = -60.0f;   // Normal walking swing lift
+
+const float Z_WALK_HIGH   = -125.0f;  // High / Tall walking height
+const float Z_UP_HIGH     = -85.0f;   // High walking swing lift
 
 const float X_DEFAULT   = 124.0f;   // Default neutral X foot spread
 const float X_OFFSET    = 0.0f;

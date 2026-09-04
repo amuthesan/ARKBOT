@@ -16,9 +16,11 @@ class CommanderPanel(QWidget):
     Control panel for high-level robot locomotion, stance, and gestures.
     """
     action_requested = Signal(str, int, float)  # (action_name, steps, speed)
+    height_requested = Signal(str)              # (height_profile: "low" | "normal" | "high")
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.current_walk_height = "normal"
         self.init_ui()
 
     def init_ui(self):
@@ -56,11 +58,43 @@ class CommanderPanel(QWidget):
         posture_layout.addWidget(self.btn_stop, 1, 1)
         main_layout.addWidget(posture_group)
 
-        # 2. Locomotion D-Pad
-        dpad_group = QGroupBox("LOCOMOTION D-PAD")
+        # 2. Locomotion D-Pad with Dynamic Walking Height Selection
+        dpad_group = QGroupBox("LOCOMOTION D-PAD (DYNAMIC WALKING HEIGHT)")
         dpad_layout = QGridLayout(dpad_group)
         dpad_layout.setSpacing(10)
 
+        # Walking Height Selector Sub-bar
+        height_container = QWidget()
+        height_layout = QHBoxLayout(height_container)
+        height_layout.setContentsMargins(0, 0, 0, 6)
+        height_layout.setSpacing(8)
+
+        lbl_hgt = QLabel("Walk Height:")
+        lbl_hgt.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;")
+        height_layout.addWidget(lbl_hgt)
+
+        self.btn_hgt_low = QPushButton("🔻 Low (-80mm)")
+        self.btn_hgt_low.setObjectName("btn_hgt_low")
+        self.btn_hgt_low.clicked.connect(lambda: self._set_walk_height("low"))
+
+        self.btn_hgt_normal = QPushButton("🚶 Normal (-100mm)")
+        self.btn_hgt_normal.setObjectName("btn_hgt_normal")
+        self.btn_hgt_normal.clicked.connect(lambda: self._set_walk_height("normal"))
+
+        self.btn_hgt_high = QPushButton("🔺 High (-125mm)")
+        self.btn_hgt_high.setObjectName("btn_hgt_high")
+        self.btn_hgt_high.clicked.connect(lambda: self._set_walk_height("high"))
+
+        for b in [self.btn_hgt_low, self.btn_hgt_normal, self.btn_hgt_high]:
+            b.setMinimumHeight(32)
+            b.setCursor(Qt.PointingHandCursor)
+
+        height_layout.addWidget(self.btn_hgt_low)
+        height_layout.addWidget(self.btn_hgt_normal)
+        height_layout.addWidget(self.btn_hgt_high)
+        dpad_layout.addWidget(height_container, 0, 0, 1, 3)
+
+        # D-Pad Movement Buttons
         self.btn_fwd = QPushButton("▲ FORWARD")
         self.btn_fwd.setObjectName("btn_fwd")
         self.btn_fwd.clicked.connect(lambda: self._trigger_action("forward"))
@@ -82,15 +116,16 @@ class CommanderPanel(QWidget):
         self.btn_back.clicked.connect(lambda: self._trigger_action("backward"))
 
         # Grid placement
-        dpad_layout.addWidget(self.btn_fwd, 0, 1)
-        dpad_layout.addWidget(self.btn_left, 1, 0)
-        dpad_layout.addWidget(self.btn_center, 1, 1)
-        dpad_layout.addWidget(self.btn_right, 1, 2)
-        dpad_layout.addWidget(self.btn_back, 2, 1)
+        dpad_layout.addWidget(self.btn_fwd, 1, 1)
+        dpad_layout.addWidget(self.btn_left, 2, 0)
+        dpad_layout.addWidget(self.btn_center, 2, 1)
+        dpad_layout.addWidget(self.btn_right, 2, 2)
+        dpad_layout.addWidget(self.btn_back, 3, 1)
 
         for btn in [self.btn_fwd, self.btn_left, self.btn_center, self.btn_right, self.btn_back]:
             btn.setMinimumHeight(42)
 
+        self._refresh_height_ui()
         main_layout.addWidget(dpad_group)
 
         # 3. 180° U-Turn Rotation Buttons
@@ -168,6 +203,25 @@ class CommanderPanel(QWidget):
 
         main_layout.addWidget(params_group)
         main_layout.addStretch()
+
+    def _set_walk_height(self, height_profile):
+        self.current_walk_height = height_profile
+        self._refresh_height_ui()
+        self.height_requested.emit(height_profile)
+        self.action_requested.emit(f"set_height_{height_profile}", 1, 1.0)
+
+    def update_walk_height(self, height_profile):
+        if height_profile and height_profile != self.current_walk_height:
+            self.current_walk_height = height_profile.lower()
+            self._refresh_height_ui()
+
+    def _refresh_height_ui(self):
+        style_active = "background-color: #0284c7; border: 1px solid #00f0ff; color: #ffffff; font-weight: bold; border-radius: 6px;"
+        style_inactive = "background-color: #1e293b; border: 1px solid #334155; color: #94a3b8; font-weight: 600; border-radius: 6px;"
+
+        self.btn_hgt_low.setStyleSheet(style_active if self.current_walk_height == "low" else style_inactive)
+        self.btn_hgt_normal.setStyleSheet(style_active if self.current_walk_height == "normal" else style_inactive)
+        self.btn_hgt_high.setStyleSheet(style_active if self.current_walk_height == "high" else style_inactive)
 
     def _trigger_action(self, action_name, custom_steps=None):
         steps = custom_steps if custom_steps is not None else self.step_spin.value()

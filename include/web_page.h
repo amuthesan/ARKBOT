@@ -221,6 +221,11 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     <div class="card">
       <div class="card-title">
         <span>🕹️ Locomotion & Turning</span>
+        <div class="pill-selector">
+          <button class="pill-btn" id="btnHgtLow" onclick="setWalkHeight('low')">🔻 Low (-80mm)</button>
+          <button class="pill-btn active" id="btnHgtNorm" onclick="setWalkHeight('normal')">🚶 Normal (-100mm)</button>
+          <button class="pill-btn" id="btnHgtHigh" onclick="setWalkHeight('high')">🔺 High (-125mm)</button>
+        </div>
       </div>
       <div class="dpad-container">
         <div class="dpad-row">
@@ -319,6 +324,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
   <script>
     let currentSteps = 3;
     let currentSpeedMult = 1.0;
+    let currentWalkHgt = 'normal';
     let viewMode = 'iso';
     let isExecuting = false;
     let pollInterval = 300;
@@ -357,6 +363,32 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         b.classList.toggle('active', parseFloat(b.innerText) === spd);
       });
       showToast(`Gait Speed: ${spd}x`);
+    }
+
+    async function setWalkHeight(hgt) {
+      currentWalkHgt = hgt;
+      updateWalkHeightUI(hgt);
+      showToast(`Walking Height: ${hgt.toUpperCase()}`);
+      try {
+        const res = await fetch(`/api/action?action=set_height_${hgt}&height=${hgt}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.sites) updateSites(data.sites);
+        if (data.angles) updateAngles(data.angles);
+      } catch (err) {
+        console.error("Set height error", err);
+      }
+    }
+
+    function updateWalkHeightUI(hgt) {
+      if (!hgt) return;
+      const bLow = document.getElementById('btnHgtLow');
+      const bNorm = document.getElementById('btnHgtNorm');
+      const bHigh = document.getElementById('btnHgtHigh');
+      if (bLow && bNorm && bHigh) {
+        bLow.className = (hgt === 'low') ? 'pill-btn active' : 'pill-btn';
+        bNorm.className = (hgt === 'normal') ? 'pill-btn active' : 'pill-btn';
+        bHigh.className = (hgt === 'high') ? 'pill-btn active' : 'pill-btn';
+      }
     }
 
     function setViewMode(mode) {
@@ -433,6 +465,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         if (data.sites) updateSites(data.sites);
         if (data.angles) updateAngles(data.angles);
         if (data.extAntenna !== undefined) updateAntennaUI(data.extAntenna, data.rssi);
+        if (data.walk_height) updateWalkHeightUI(data.walk_height);
 
         const botStatus = document.getElementById('botStatus');
         const actionText = document.getElementById('activeActionText');

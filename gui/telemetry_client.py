@@ -99,6 +99,14 @@ class TelemetryWorker(QThread):
             "speed": float(speed)
         })
 
+    def send_walk_height(self, height_profile):
+        self.send_command({
+            "height": str(height_profile),
+            "action": f"set_height_{height_profile}",
+            "steps": 1,
+            "speed": 1.0
+        })
+
     def send_servo(self, leg, joint, angle):
         self.send_command({
             "servo": {
@@ -287,10 +295,18 @@ class TelemetryWorker(QThread):
                     if isinstance(cmd, dict):
                         if "action" in cmd:
                             url = f"{base_url}/api/action"
-                            post_data = urllib.parse.urlencode({
+                            params = {
                                 "action": cmd.get("action", ""),
                                 "steps": cmd.get("steps", 1),
                                 "speed": cmd.get("speed", 1.0)
+                            }
+                            if "height" in cmd:
+                                params["height"] = cmd.get("height", "")
+                            post_data = urllib.parse.urlencode(params).encode('utf-8')
+                        elif "height" in cmd:
+                            url = f"{base_url}/api/action"
+                            post_data = urllib.parse.urlencode({
+                                "height": cmd.get("height", "")
                             }).encode('utf-8')
                         elif "servo" in cmd:
                             url = f"{base_url}/api/set"

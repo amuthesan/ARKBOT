@@ -4,6 +4,26 @@ All notable changes to the **ARK-BOT** project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.4] - 2026-09-04
+
+### Added
+- **Dynamic Multi-Level Walking Height Locomotion**:
+  - Implemented dynamic stance and swing clearance profiles for walking gaits:
+    - **🔻 Low / Crouch**: $Z = -80.0\text{ mm}$ (Swing lift $Z = -50.0\text{ mm}$)
+    - **🚶 Normal**: $Z = -100.0\text{ mm}$ (Swing lift $Z = -60.0\text{ mm}$)
+    - **🔺 High / Tall**: $Z = -125.0\text{ mm}$ (Swing lift $Z = -85.0\text{ mm}$)
+  - Gaits (`step_forward`, `step_back`, `turn_left`, `turn_right`, `turn_180_*`) dynamically adapt to the selected walking height in real time.
+  - Added smooth stance transitions between heights while standing.
+- **Locomotion D-Pad Walking Height Controls**:
+  - **Python Companion GUI**: Integrated a dedicated Walk Height segmented selector directly into the **Locomotion D-Pad** box (`[ 🔻 Low (-80mm) ]`, `[ 🚶 Normal (-100mm) ]`, `[ 🔺 High (-125mm) ]`) with active cyber-glow highlights.
+  - **WebUI Commander**: Added `Low`, `Normal`, and `High` pills into the Locomotion & Turning card header.
+- **Bi-directional Height Telemetry**:
+  - Added `"walk_height"` field to Serial and Web JSON status reports for instantaneous two-way GUI sync.
+
+### Changed
+- **Standing Detection Threshold**:
+  - Updated `is_stand()` threshold from `<= -85.0mm` to `<= -70.0mm` so that Low/Crouch stance ($Z = -80.0\text{ mm}$) is accurately identified as standing.
+
 ## [v1.0.3] - 2026-09-04
 
 ### Added
