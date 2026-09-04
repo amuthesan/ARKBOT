@@ -905,7 +905,9 @@ void drawMainDashboard(bool heartbeat, int cycleIndex) {
 
     display.drawFastHLine(0, 52, SCREEN_WIDTH, SSD1306_WHITE);
     display.setCursor(0, 55);
-    if (cycleIndex == 0) {
+    if (!pcaReady) {
+        display.print(F("! PCA9685 OFFLINE !"));
+    } else if (cycleIndex == 0) {
         display.print(F("IP: ")); display.print(activeIp);
     } else if (cycleIndex == 1) {
         display.print(F("MD: ")); display.print(currentMode);
@@ -936,12 +938,26 @@ void handleSetup() {
 }
 
 void handleStatus() {
+    // Dynamic PCA9685 connection re-probe if state changes
+    if (!pcaReady && probeI2C(PCA9685_I2C_ADDRESS)) {
+        pwm.begin();
+        pwm.setOscillatorFrequency(27000000);
+        pwm.setPWMFreq(SERVO_FREQ);
+        pcaReady = true;
+        currentMode = "ALL @ 90deg";
+        Serial.println(F("[OK] PCA9685 Driver connected (0x40)"));
+    } else if (pcaReady && !probeI2C(PCA9685_I2C_ADDRESS)) {
+        pcaReady = false;
+        currentMode = "PCA OFFLINE";
+        Serial.println(F("[WARN] PCA9685 disconnected (0x40)"));
+    }
+
     String json = "{";
     json += "\"robot\":\"" + String(ROBOT_NAME) + "\",";
     json += "\"version\":\"" + String(ROBOT_VERSION) + "\",";
     json += "\"pcaReady\":" + String(pcaReady ? "true" : "false") + ",";
-    json += "\"mode\":\"" + currentMode + "\",";
-    json += "\"moving\":" + String(isActionRunning ? "true" : "false") + ",";
+    json += "\"mode\":\"" + (pcaReady ? currentMode : "PCA OFFLINE") + "\",";
+    json += "\"moving\":" + String((pcaReady && isActionRunning) ? "true" : "false") + ",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
     json += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
@@ -992,6 +1008,18 @@ void handleAction() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     if (!server.hasArg("action")) {
         server.send(400, "application/json", "{\"error\":\"Missing 'action' parameter\"}");
+        return;
+    }
+
+    if (!pcaReady && probeI2C(PCA9685_I2C_ADDRESS)) {
+        pwm.begin();
+        pwm.setOscillatorFrequency(27000000);
+        pwm.setPWMFreq(SERVO_FREQ);
+        pcaReady = true;
+    }
+
+    if (!pcaReady) {
+        server.send(503, "application/json", "{\"status\":\"error\",\"error\":\"PCA9685 driver offline (0x40)\"}");
         return;
     }
 
@@ -1270,13 +1298,15 @@ void setup() {
         pwm.setOscillatorFrequency(27000000);
         pwm.setPWMFreq(SERVO_FREQ);
         pcaReady = true;
+        currentMode = "ALL @ 90deg";
         Serial.println(F("[OK] PCA9685 Driver initialized (0x40)"));
         delay(300);
         // Start calibrated to 90 degrees neutral position
         calibrateAllServos(true);
     } else {
         pcaReady = false;
-        Serial.println(F("[FAIL] PCA9685 NOT found!"));
+        currentMode = "PCA OFFLINE";
+        Serial.println(F("[FAIL] PCA9685 NOT found (0x40)!"));
         playErrorChime();
     }
 
