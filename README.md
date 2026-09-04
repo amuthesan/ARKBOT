@@ -26,8 +26,8 @@ To make upgrading from the Arduino Nano seamless, each servo connects to the **P
 | **9** | **Front-Left (FL)** | **Tibia (Calf)** | `D9` |
 | **10** | **Front-Left (FL)** | **Coxa (Hip)** | `D10` |
 | **11** | **Rear-Left (RL)** | **Femur (Thigh)** | `D11` |
-| **12** | **Rear-Left (RL)** | **Coxa (Hip)** | `D12` |
-| **13** | **Rear-Left (RL)** | **Tibia (Calf)** | `D13` |
+| **12** | **Rear-Left (RL)** | **Tibia (Calf)** | `D12` |
+| **13** | **Rear-Left (RL)** | **Coxa (Hip)** | `D13` |
 | **14** | *(Unused)* | — | — |
 | **15** | *(Unused)* | — | — |
 
@@ -38,9 +38,9 @@ To make upgrading from the Arduino Nano seamless, each servo connects to the **P
 | Leg | Coxa (Hip) | Femur (Thigh) | Tibia (Calf) |
 | :--- | :---: | :---: | :---: |
 | **Front-Right (FR)** | **Port 4** *(D4)* | **Port 2** *(D2)* | **Port 3** *(D3)* |
-| **Front-Left (FL)** | **Port 10** *(D10)* | **Port 8** *(D8)* | **Port 9** *(D9)* |
 | **Rear-Right (RR)** | **Port 7** *(D7)* | **Port 5** *(D5)* | **Port 6** *(D6)* |
-| **Rear-Left (RL)** | **Port 12** *(D12)* | **Port 11** *(D11)* | **Port 13** *(D13)* |
+| **Front-Left (FL)** | **Port 10** *(D10)* | **Port 8** *(D8)* | **Port 9** *(D9)* |
+| **Rear-Left (RL)** | **Port 13** *(D13)* | **Port 11** *(D11)* | **Port 12** *(D12)* |
 
 ---
 

@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [v1.0.1] - 2026-09-04
+
+### Fixed
+- **Calibration "Center All (90°)" & Slider Overwrite Issue**:
+  - Gated background FreeRTOS kinematics task with `kinematicsActive` flag so entering calibration mode or clicking "Center All (90°)" directly controls PCA9685 PWM registers without interference.
+- **Exact Arduino Nano Kinematics Restoration**:
+  - Restored exact 1-to-1 hardware channel and leg mapping matching original Arduino Nano layout (0: Front-Right, 1: Rear-Right, 2: Front-Left, 3: Rear-Left) and joint order (Coxa, Femur, Tibia).
+  - Ported authentic Nano equations for gaits, spot turns, body shifting, and hand gestures.
+- **Live 3D Kinematics Web Visualizer**:
+  - Added real-time Cartesian sites telemetry (`"sites": [[x, y, z], ...]`) to `/api/status`.
+  - Implemented exact forward kinematics geometry on HTML5 Canvas in `/` Commander to accurately animate all 4 limbs, stance elevation, and foot ground contact pads in real time.
+- **Vector Cyber Logo Asset**:
+  - Replaced broken raster base64 logo with a high-definition vector SVG cybernetic quadruped emblem across all UI pages.
+- **PCA9685 Offline Detection & Safety Guard**:
+  - Dynamic I2C connection verification; accurately displays `STATUS: PCA OFFLINE (0x40)` in red when servo driver is disconnected.
+  - Added action lockouts and OLED alert (`! PCA9685 OFFLINE !`) when hardware is unpowered.
+  - Enabled auto-recovery when PCA9685 power / I2C is reconnected.
+
+---
+
 ## [v1.0.0] - 2026-09-04
 
 ### Added
