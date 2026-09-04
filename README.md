@@ -71,14 +71,21 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
  1. Power on the robot.
  2. Ensure your computer/phone is on the same network (**`AKR Home`**) or connect to the fallback SoftAP (**`ARK-BOT-AP`**, Pass: `12345678`).
  3. Open your browser:
-    - **Visual Kinematics Calibrator**: [`http://arkbot.local/calib`](http://arkbot.local/calib) (or root [`http://arkbot.local`](http://arkbot.local) which redirects to `/calib`).
-    - **Wi-Fi & System Setup**: [`http://arkbot.local/setup`](http://arkbot.local/setup).
-    - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx/calib`).
+    - **🎮 Action Commander (Homepage)**: [`http://arkbot.local/`](http://arkbot.local/)
+    - **🎯 Visual Kinematics Calibrator**: [`http://arkbot.local/calib`](http://arkbot.local/calib)
+    - **⚙️ Wi-Fi & System Setup**: [`http://arkbot.local/setup`](http://arkbot.local/setup)
+    - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx`).
+ 
+ ### 🎮 Action Commander (`/`)
+ - **Directional Gait D-Pad**: Click on-screen buttons for **Forward**, **Backward**, **Turn Left**, **Turn Right**, and **Stop/Rest**.
+ - **Postures & Social Gestures**: One-click **Stand Up** ($Z = -100\text{ mm}$), **Sit Down** ($Z = -56\text{ mm}$), **Hand Shake**, and **Hand Wave**.
+ - **Gait Customization**: Select step counts ($1, 2, 3, 5, 10$) and speed multipliers ($1.0\times, 1.5\times, 2.0\times$).
+ - **Live 3D Kinematics Visualizer**: Real-time 3D simulation displaying robot movements and limb articulation.
  
  ### 🎯 Visual Calibrator (`/calib`)
- - **Interactive 3D/2D Simulation**: `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives with smooth LERP mechanical animation.
- - **Master Power & Alignment**: Master Start/Stop holding torque buttons, Center All ($90^\circ$), and Wave Calibration.
- - **Individual Joint Power & Sliders**: Independent power toggles and sliders for all 12 leg joints across 4 legs.
+ - **Interactive Kinematics Simulator**: `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives with smooth mechanical LERP animation.
+ - **Master Power & Neutral Alignment**: Master Start/Stop holding torque buttons, Center All ($90^\circ$), and Wave Calibration.
+ - **Individual Joint Sliders**: Independent power toggles and sliders for all 12 leg joints across 4 legs.
  - **RF Antenna Switcher**: Direct toggle between `📡 Int` (Ceramic) and `🛰️ Ext` (External IPEX) with live RSSI reporting.
  
  ### ⚙️ Wi-Fi & System Setup (`/setup`)
@@ -86,4 +93,5 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
  - **Credential Configuration**: Quick-select network from scan results, input Wi-Fi password with show/hide toggle, and save to persistent NVS storage across reboots.
  - **Telemetry Dashboard**: Live connection status, Station IP, SoftAP IP, MAC address, mDNS URL, and system uptime.
  - **Device Management**: Safely restart the ESP32-C6 controller or reset Wi-Fi configuration with automatic reconnection timer.
+
 

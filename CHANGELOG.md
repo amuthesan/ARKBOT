@@ -6,7 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [v1.0.0] - 2026-09-04
+
+### Added
+- **Full Inverse Kinematics & 3D Trigonometric Engine Ported to ESP32-C6**:
+  - Implemented 50Hz (20ms) high-precision FreeRTOS kinematics task executing continuous Cartesian-to-Polar inverse kinematics transformations (`cartesian_to_polar` and `polar_to_servo`).
+  - Seamless interpolation and trajectory tracking towards `site_expect` across all 4 legs.
+- **Cyber Action Commander Homepage (`/`)**:
+  - Homepage served at [`http://arkbot.local/`](http://arkbot.local/) is now the primary **Motion Commander Dashboard**.
+  - Directional Motion D-Pad: **FORWARD**, **BACKWARD**, **TURN LEFT**, **TURN RIGHT**, and **STOP / REST**.
+  - Posture & Gesture Triggers: **STAND UP** (height -100mm), **SIT DOWN** (rest height -56mm), **HAND SHAKE**, and **HAND WAVE**.
+  - Live 3D/2D Kinematics simulator displaying real-time robot pose.
+  - Step counter selector ($1, 2, 3, 5, 10$ steps) and Gait speed multiplier ($1.0\times, 1.5\times, 2.0\times$).
+- **Asynchronous FreeRTOS Motion Queue**:
+  - Dedicated background action worker task executing gaits smoothly without blocking HTTP WebServer requests or UI responsiveness.
+  - Instant motion abort / emergency stop support.
+- **Unified 3-Page Navigation Header**:
+  - Seamless switching across `🎮 Commander` (`/`), `🎯 Calibrator` (`/calib`), and `⚙️ Setup` (`/setup`).
+- **REST & Serial Command Protocol**:
+  - `POST /api/action`: Execute motion routines via REST API.
+  - Legacy Serial command interface (`w <action_mode> <steps>`) supported for HC-06 Bluetooth / Serial UART remote controllers.
+
+### Changed
+- Promoted project to **v1.0.0** stable release.
+- Homepage `/` now hosts the Action Commander dashboard while calibration is available at `/calib`.
+
+---
+
 ## [v0.1.2] - 2026-09-04
+
 
 ### Added
 - **Dedicated Setup & Wi-Fi Configuration (`/setup`)**:

@@ -6,7 +6,32 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v0.1.2"
+#define ROBOT_VERSION     "v1.0.0"
+
+// ==========================================
+// Quadruped Physical & Kinematics Dimensions (mm)
+// ==========================================
+const float LENGTH_A    = 84.0f;    // Femur (Thigh) length
+const float LENGTH_B    = 145.0f;   // Tibia (Calf) length
+const float LENGTH_C    = 72.5f;    // Coxa (Hip) length
+const float LENGTH_SIDE = 145.4f;   // Body chassis base width/length
+
+// Movement & Stance Z Coordinates
+const float Z_ABSOLUTE  = -56.0f;   // Mechanical rest/sit height
+const float Z_DEFAULT   = -100.0f;  // Normal standing height
+const float Z_UP        = -60.0f;   // Swing phase leg lift clearance
+const float Z_BOOT      = Z_ABSOLUTE;
+
+const float X_DEFAULT   = 124.0f;   // Default neutral X foot spread
+const float X_OFFSET    = 0.0f;
+const float Y_START     = 0.0f;
+const float Y_STEP      = 80.0f;    // Stride length per gait cycle
+
+// Speed Presets
+const float SPOT_TURN_SPEED   = 5.0f;
+const float LEG_MOVE_SPEED    = 10.0f;
+const float BODY_MOVE_SPEED   = 4.0f;
+const float STAND_SEAT_SPEED  = 2.0f;
 
 
 // ==========================================

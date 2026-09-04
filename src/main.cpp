@@ -11,13 +11,50 @@
 #include "config.h"
 #include "web_page.h"
 
-// Hardware Instances
+// ==========================================
+// Hardware & Subsystem Instances
+// ==========================================
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDRESS);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 WebServer server(80);
 Preferences preferences;
 
-// State tracking
+// ==========================================
+// Kinematics & Coordinate Tracking State
+// ==========================================
+// 4 Legs: 0: FR, 1: RR, 2: FL, 3: RL
+// 3 Coordinates per leg: 0: X, 1: Y, 2: Z
+volatile float site_now[4][3];
+volatile float site_expect[4][3];
+float temp_speed[4][3];
+float move_speed = STAND_SEAT_SPEED;
+float speed_multiple = 1.0f;
+volatile int rest_counter = 0;
+const float KEEP = 255.0f;
+
+// Precalculated turning parameters
+float temp_a;
+float temp_b;
+float temp_c;
+float temp_alpha;
+float turn_x1;
+float turn_y1;
+float turn_x0;
+float turn_y0;
+
+// Hardware Channel Mapping:
+// Leg 0 (FR): Femur CH 2, Tibia CH 3, Coxa CH 4
+// Leg 1 (RR): Femur CH 5, Tibia CH 6, Coxa CH 7
+// Leg 2 (FL): Femur CH 8, Tibia CH 9, Coxa CH 10
+// Leg 3 (RL): Femur CH 11, Tibia CH 13, Coxa CH 12
+const int KIN_SERVO_CH[4][3] = {
+    {2, 3, 4},
+    {5, 6, 7},
+    {8, 9, 10},
+    {11, 13, 12}
+};
+
+// State Tracking
 int currentAngles[NUM_LEGS][SERVOS_PER_LEG];
 bool servoEnabled[NUM_LEGS][SERVOS_PER_LEG];
 bool oledReady = false;
@@ -25,25 +62,43 @@ bool pcaReady = false;
 bool wifiStaConnected = false;
 bool useExternalAntenna = false;
 String activeIp = "192.168.4.1";
-String currentMode = "ALL @ 90deg";
+String currentMode = "STAND";
+volatile bool isActionRunning = false;
+volatile bool stopRequested = false;
 
-// Wi-Fi Persistent Configuration State
+// Persistent Wi-Fi Credentials
 String staSsid = WIFI_STA_SSID;
 String staPass = WIFI_STA_PASS;
 
-// Forward declarations
+// Task Handles
+TaskHandle_t kinematicsTaskHandle = NULL;
+TaskHandle_t actionTaskHandle = NULL;
+
+// Forward Declarations
 void playStepChime();
 void playReadyChime();
 void playBootChime();
 void playErrorChime();
 void setAntenna(bool external, bool persist);
-void setLegJointAngle(int leg, int joint, int angle);
-void setServoPower(int leg, int joint, bool enable);
-void setMasterPower(bool enable);
-void setLegPower(int leg, bool enable);
-void calibrateAllServos(bool sequential);
-void loadWifiConfig();
-void connectWifi(const String& ssid, const String& pass, unsigned long timeoutMs = 6000);
+void setServoAngle(int channel, int angle);
+void cartesian_to_polar(float &alpha, float &beta, float &gamma, float x, float y, float z);
+void polar_to_servo(int leg, float alpha, float beta, float gamma);
+void set_site(int leg, float x, float y, float z);
+void wait_reach(int leg);
+void wait_all_reach();
+bool is_stand();
+void stand();
+void sit();
+void step_forward(unsigned int step);
+void step_back(unsigned int step);
+void turn_left(unsigned int step);
+void turn_right(unsigned int step);
+void body_left(int i);
+void body_right(int i);
+void hand_wave(int i);
+void hand_shake(int i);
+void executeAction(const String& act, int steps, float spd);
+void parseSerialCommand(const String& cmd);
 
 // ==========================================
 // Seeed Studio XIAO ESP32-C6 Antenna Control
@@ -56,12 +111,10 @@ void initAntenna() {
 }
 
 void setAntenna(bool external, bool persist = true) {
-    // GPIO3: Enable RF switch (Active LOW)
     pinMode(ANT_PWR_PIN, OUTPUT);
-    digitalWrite(ANT_PWR_PIN, LOW);
+    digitalWrite(ANT_PWR_PIN, LOW); // Active LOW power
     delay(10);
 
-    // GPIO14: LOW = Internal Ceramic, HIGH = External U.FL/IPEX
     pinMode(ANT_SEL_PIN, OUTPUT);
     digitalWrite(ANT_SEL_PIN, external ? HIGH : LOW);
     useExternalAntenna = external;
@@ -72,68 +125,11 @@ void setAntenna(bool external, bool persist = true) {
         preferences.end();
     }
 
-    Serial.printf("[RF] Active Antenna: %s (GPIO14=%s)\n", 
-        external ? "EXTERNAL (U.FL / IPEX)" : "INTERNAL (Ceramic)", 
-        external ? "HIGH" : "LOW");
+    Serial.printf("[RF] Antenna: %s\n", external ? "EXTERNAL (IPEX)" : "INTERNAL (Ceramic)");
 }
 
 // ==========================================
-// Wi-Fi NVS Preferences Storage
-// ==========================================
-void loadWifiConfig() {
-    preferences.begin("ark_wifi", false);
-    staSsid = preferences.getString("ssid", WIFI_STA_SSID);
-    staPass = preferences.getString("pass", WIFI_STA_PASS);
-    preferences.end();
-}
-
-void saveWifiConfig(const String& ssid, const String& pass) {
-    staSsid = ssid;
-    staPass = pass;
-    preferences.begin("ark_wifi", false);
-    preferences.putString("ssid", ssid);
-    preferences.putString("pass", pass);
-    preferences.end();
-    Serial.printf("[NVS] Wi-Fi credentials saved: SSID '%s'\n", ssid.c_str());
-}
-
-void resetWifiConfig() {
-    preferences.begin("ark_wifi", false);
-    preferences.clear();
-    preferences.end();
-    staSsid = WIFI_STA_SSID;
-    staPass = WIFI_STA_PASS;
-    Serial.println(F("[NVS] Wi-Fi credentials reset to defaults."));
-}
-
-void connectWifi(const String& ssid, const String& pass, unsigned long timeoutMs) {
-    Serial.printf("[WiFi] Connecting to '%s' ...\n", ssid.c_str());
-    WiFi.disconnect();
-    delay(100);
-    WiFi.begin(ssid.c_str(), pass.c_str());
-
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < timeoutMs) {
-        delay(250);
-        Serial.print(F("."));
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiStaConnected = true;
-        activeIp = WiFi.localIP().toString();
-        Serial.printf("[OK] Connected to %s! IP: %s\n", ssid.c_str(), activeIp.c_str());
-        Serial.printf("[OK] Active Antenna: %s, RSSI: %d dBm\n", 
-            useExternalAntenna ? "EXTERNAL" : "INTERNAL", WiFi.RSSI());
-    } else {
-        wifiStaConnected = false;
-        activeIp = WiFi.softAPIP().toString();
-        Serial.println(F("[WARN] Could not connect to Home Wi-Fi. Operating in SoftAP fallback."));
-    }
-}
-
-// ==========================================
-// Buzzer Audio Feedback Helpers (LEDC PWM)
+// Buzzer Audio Feedback (LEDC PWM)
 // ==========================================
 void initBuzzer() {
     ledcAttach(BUZZER_PIN, 2000, 8);
@@ -152,42 +148,27 @@ void playTone(int freq, int durationMs) {
 }
 
 void playBootChime() {
-    playTone(1047, 70);  // C6
+    playTone(1047, 70);
     delay(30);
-    playTone(1319, 70);  // E6
+    playTone(1319, 70);
     delay(30);
-    playTone(1568, 70);  // G6
+    playTone(1568, 70);
     delay(30);
-    playTone(2093, 120); // C7
+    playTone(2093, 120);
 }
 
-void playStepChime() {
-    playTone(1760, 25);  // A6
-}
-
-void playReadyChime() {
-    playTone(1319, 80);  // E6
-    delay(40);
-    playTone(1760, 160); // A6
-}
-
-void playErrorChime() {
-    playTone(440, 150);  // A4
-    delay(60);
-    playTone(349, 250);  // F4
-}
+void playStepChime() { playTone(1760, 25); }
+void playReadyChime() { playTone(1319, 80); delay(40); playTone(1760, 160); }
+void playErrorChime() { playTone(440, 150); delay(60); playTone(349, 250); }
 
 // ==========================================
-// I2C Helper
+// I2C Helper & PCA9685 Control
 // ==========================================
 bool probeI2C(uint8_t address) {
     Wire.beginTransmission(address);
     return (Wire.endTransmission() == 0);
 }
 
-// ==========================================
-// Servo Control via PCA9685
-// ==========================================
 int angleToPulse(int angle) {
     angle = constrain(angle, 0, 180);
     return map(angle, 0, 180, SERVOMIN_COUNT, SERVOMAX_COUNT);
@@ -199,45 +180,650 @@ void setServoAngle(int channel, int angle) {
     pwm.setPWM(channel, 0, pulse);
 }
 
-void setServoPower(int leg, int joint, bool enable) {
-    if (leg < 0 || leg >= NUM_LEGS || joint < 0 || joint >= SERVOS_PER_LEG) return;
-    int ch = SERVO_CHANNELS[leg][joint];
-    servoEnabled[leg][joint] = enable;
-    if (enable) {
-        setServoAngle(ch, currentAngles[leg][joint]);
-    } else {
-        if (pcaReady) {
-            pwm.setPWM(ch, 0, 0); // Release motor (0 duty cycle stops PWM pulse)
-        }
-    }
-}
-
 void setMasterPower(bool enable) {
-    for (int l = 0; l < NUM_LEGS; l++) {
-        for (int j = 0; j < SERVOS_PER_LEG; j++) {
-            setServoPower(l, j, enable);
+    for (int l = 0; l < 4; l++) {
+        for (int j = 0; j < 3; j++) {
+            servoEnabled[l][j] = enable;
+            int ch = KIN_SERVO_CH[l][j];
+            if (enable) {
+                setServoAngle(ch, currentAngles[l][j]);
+            } else if (pcaReady) {
+                pwm.setPWM(ch, 0, 0);
+            }
         }
     }
     currentMode = enable ? "ALL ENERGIZED" : "ALL RELEASED";
     playStepChime();
 }
 
-void setLegPower(int leg, bool enable) {
-    if (leg < 0 || leg >= NUM_LEGS) return;
-    for (int j = 0; j < SERVOS_PER_LEG; j++) {
-        setServoPower(leg, j, enable);
+void setServoPower(int leg, int joint, bool enable) {
+    if (leg < 0 || leg >= 4 || joint < 0 || joint >= 3) return;
+    servoEnabled[leg][joint] = enable;
+    int ch = SERVO_CHANNELS[leg][joint];
+    if (enable) {
+        setServoAngle(ch, currentAngles[leg][joint]);
+    } else if (pcaReady) {
+        pwm.setPWM(ch, 0, 0);
     }
-    currentMode = String(LEG_NAMES[leg]) + (enable ? " ON" : " OFF");
+}
+
+void setLegPower(int leg, bool enable) {
+    if (leg < 0 || leg >= 4) return;
+    for (int j = 0; j < 3; j++) setServoPower(leg, j, enable);
     playStepChime();
 }
 
-void setLegJointAngle(int leg, int joint, int angle) {
-    if (leg >= 0 && leg < NUM_LEGS && joint >= 0 && joint < SERVOS_PER_LEG) {
-        angle = constrain(angle, 0, 180);
-        int ch = SERVO_CHANNELS[leg][joint];
-        currentAngles[leg][joint] = angle;
-        servoEnabled[leg][joint] = true;
-        setServoAngle(ch, angle);
+// ==========================================
+// Kinematics Core Mathematics & Inverse Kinematics
+// ==========================================
+void initKinematics() {
+    temp_a = sqrt(pow(2 * X_DEFAULT + LENGTH_SIDE, 2) + pow(Y_STEP, 2));
+    temp_b = 2 * (Y_START + Y_STEP) + LENGTH_SIDE;
+    temp_c = sqrt(pow(2 * X_DEFAULT + LENGTH_SIDE, 2) + pow(2 * Y_START + Y_STEP + LENGTH_SIDE, 2));
+    temp_alpha = acos((pow(temp_a, 2) + pow(temp_b, 2) - pow(temp_c, 2)) / (2 * temp_a * temp_b));
+    turn_x1 = (temp_a - LENGTH_SIDE) / 2.0f;
+    turn_y1 = Y_START + Y_STEP / 2.0f;
+    turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
+    turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - LENGTH_SIDE;
+
+    // Set default initial sites
+    site_expect[0][0] = X_DEFAULT - X_OFFSET; site_expect[0][1] = Y_START + Y_STEP; site_expect[0][2] = Z_BOOT;
+    site_expect[1][0] = X_DEFAULT - X_OFFSET; site_expect[1][1] = Y_START + Y_STEP; site_expect[1][2] = Z_BOOT;
+    site_expect[2][0] = X_DEFAULT + X_OFFSET; site_expect[2][1] = Y_START;          site_expect[2][2] = Z_BOOT;
+    site_expect[3][0] = X_DEFAULT + X_OFFSET; site_expect[3][1] = Y_START;          site_expect[3][2] = Z_BOOT;
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 3; j++) {
+            site_now[i][j] = site_expect[i][j];
+            temp_speed[i][j] = 0;
+            currentAngles[i][j] = 90;
+            servoEnabled[i][j] = true;
+        }
+    }
+}
+
+void cartesian_to_polar(float &alpha, float &beta, float &gamma, float x, float y, float z) {
+    float v, w;
+    w = (x >= 0 ? 1 : -1) * (sqrt(pow(x, 2) + pow(y, 2)));
+    v = w - LENGTH_C;
+    alpha = atan2(z, v) + acos((pow(LENGTH_A, 2) - pow(LENGTH_B, 2) + pow(v, 2) + pow(z, 2)) / (2 * LENGTH_A * sqrt(pow(v, 2) + pow(z, 2))));
+    beta = acos((pow(LENGTH_A, 2) + pow(LENGTH_B, 2) - pow(v, 2) - pow(z, 2)) / (2 * LENGTH_A * LENGTH_B));
+    gamma = (w >= 0) ? atan2(y, x) : atan2(-y, -x);
+
+    alpha = alpha / PI * 180.0f;
+    beta = beta / PI * 180.0f;
+    gamma = gamma / PI * 180.0f;
+}
+
+void polar_to_servo(int leg, float alpha, float beta, float gamma) {
+    float a = alpha;
+    float b = beta;
+    float g = gamma;
+
+    if (leg == 0) { // FR
+        a = 90.0f - alpha;
+        b = beta;
+        g += 90.0f;
+    } else if (leg == 1) { // RR
+        a += 90.0f;
+        b = 180.0f - beta;
+        g = 90.0f - gamma;
+    } else if (leg == 2) { // FL
+        a += 90.0f;
+        b = 180.0f - beta;
+        g = 90.0f - gamma;
+    } else if (leg == 3) { // RL
+        a = 90.0f - alpha;
+        b = beta;
+        g += 90.0f;
+    }
+
+    int angFemur = constrain((int)round(a), 0, 180);
+    int angTibia = constrain((int)round(b), 0, 180);
+    int angCoxa  = constrain((int)round(g), 0, 180);
+
+    // Update global angles for telemetry & visualizer
+    // Index map: 0: Coxa, 1: Femur, 2: Tibia
+    currentAngles[leg][0] = angCoxa;
+    currentAngles[leg][1] = angFemur;
+    currentAngles[leg][2] = angTibia;
+
+    if (pcaReady) {
+        setServoAngle(KIN_SERVO_CH[leg][0], angFemur);
+        setServoAngle(KIN_SERVO_CH[leg][1], angTibia);
+        setServoAngle(KIN_SERVO_CH[leg][2], angCoxa);
+    }
+}
+
+void set_site(int leg, float x, float y, float z) {
+    float length_x = 0, length_y = 0, length_z = 0;
+
+    if (x != KEEP) length_x = x - site_now[leg][0];
+    if (y != KEEP) length_y = y - site_now[leg][1];
+    if (z != KEEP) length_z = z - site_now[leg][2];
+
+    float length = sqrt(pow(length_x, 2) + pow(length_y, 2) + pow(length_z, 2));
+
+    if (length > 0.001f) {
+        temp_speed[leg][0] = length_x / length * move_speed * speed_multiple;
+        temp_speed[leg][1] = length_y / length * move_speed * speed_multiple;
+        temp_speed[leg][2] = length_z / length * move_speed * speed_multiple;
+    } else {
+        temp_speed[leg][0] = 0;
+        temp_speed[leg][1] = 0;
+        temp_speed[leg][2] = 0;
+    }
+
+    if (x != KEEP) site_expect[leg][0] = x;
+    if (y != KEEP) site_expect[leg][1] = y;
+    if (z != KEEP) site_expect[leg][2] = z;
+}
+
+void wait_reach(int leg) {
+    while (!stopRequested) {
+        if (fabs(site_now[leg][0] - site_expect[leg][0]) < 0.01f &&
+            fabs(site_now[leg][1] - site_expect[leg][1]) < 0.01f &&
+            fabs(site_now[leg][2] - site_expect[leg][2]) < 0.01f) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void wait_all_reach() {
+    for (int i = 0; i < 4; i++) {
+        wait_reach(i);
+        if (stopRequested) break;
+    }
+}
+
+bool is_stand() {
+    return (fabs(site_now[0][2] - Z_DEFAULT) < 2.0f);
+}
+
+// 50Hz FreeRTOS Kinematics Task
+void kinematicsTask(void* parameter) {
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 20ms = 50Hz
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+
+    float alpha, beta, gamma;
+
+    for (;;) {
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (fabs(site_now[i][j] - site_expect[i][j]) >= fabs(temp_speed[i][j])) {
+                    site_now[i][j] += temp_speed[i][j];
+                } else {
+                    site_now[i][j] = site_expect[i][j];
+                }
+            }
+            cartesian_to_polar(alpha, beta, gamma, site_now[i][0], site_now[i][1], site_now[i][2]);
+            polar_to_servo(i, alpha, beta, gamma);
+        }
+        rest_counter = rest_counter + 1;
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+// ==========================================
+// Gait Motion Routines
+// ==========================================
+void sit() {
+    move_speed = STAND_SEAT_SPEED;
+    currentMode = "SITTING";
+    for (int leg = 0; leg < 4; leg++) {
+        set_site(leg, KEEP, KEEP, Z_BOOT);
+    }
+    wait_all_reach();
+    currentMode = "REST / SIT";
+}
+
+void stand() {
+    move_speed = STAND_SEAT_SPEED;
+    currentMode = "STANDING";
+    for (int leg = 0; leg < 4; leg++) {
+        set_site(leg, KEEP, KEEP, Z_DEFAULT);
+    }
+    wait_all_reach();
+    currentMode = "STAND";
+}
+
+void step_forward(unsigned int step) {
+    move_speed = LEG_MOVE_SPEED;
+    currentMode = "FORWARD";
+    while (step-- > 0 && !stopRequested) {
+        if (site_now[2][1] == Y_START) {
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = BODY_MOVE_SPEED;
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = LEG_MOVE_SPEED;
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        } else {
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = BODY_MOVE_SPEED;
+            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = LEG_MOVE_SPEED;
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        }
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+void step_back(unsigned int step) {
+    move_speed = LEG_MOVE_SPEED;
+    currentMode = "BACKWARD";
+    while (step-- > 0 && !stopRequested) {
+        if (site_now[3][1] == Y_START) {
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = BODY_MOVE_SPEED;
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = LEG_MOVE_SPEED;
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        } else {
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = BODY_MOVE_SPEED;
+            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+
+            move_speed = LEG_MOVE_SPEED;
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            wait_all_reach();
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        }
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+void turn_left(unsigned int step) {
+    move_speed = SPOT_TURN_SPEED;
+    currentMode = "TURN LEFT";
+    while (step-- > 0 && !stopRequested) {
+        if (site_now[3][1] == Y_START) {
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+
+            set_site(0, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(1, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(2, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            wait_all_reach();
+
+            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(2, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(3, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            wait_all_reach();
+
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        } else {
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+
+            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(1, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(2, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(3, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(1, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(3, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            wait_all_reach();
+
+            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        }
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+void turn_right(unsigned int step) {
+    move_speed = SPOT_TURN_SPEED;
+    currentMode = "TURN RIGHT";
+    while (step-- > 0 && !stopRequested) {
+        if (site_now[2][1] == Y_START) {
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+
+            set_site(0, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(1, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(3, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(1, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(2, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(3, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            wait_all_reach();
+
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        } else {
+            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+
+            set_site(0, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(2, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(3, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(0, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(1, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(2, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            wait_all_reach();
+
+            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            wait_all_reach();
+
+            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            wait_all_reach();
+
+            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            wait_all_reach();
+        }
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+void body_left(int i) {
+    set_site(0, site_now[0][0] + i, KEEP, KEEP);
+    set_site(1, site_now[1][0] + i, KEEP, KEEP);
+    set_site(2, site_now[2][0] - i, KEEP, KEEP);
+    set_site(3, site_now[3][0] - i, KEEP, KEEP);
+    wait_all_reach();
+}
+
+void body_right(int i) {
+    set_site(0, site_now[0][0] - i, KEEP, KEEP);
+    set_site(1, site_now[1][0] - i, KEEP, KEEP);
+    set_site(2, site_now[2][0] + i, KEEP, KEEP);
+    set_site(3, site_now[3][0] + i, KEEP, KEEP);
+    wait_all_reach();
+}
+
+void hand_wave(int i) {
+    float x_tmp, y_tmp, z_tmp;
+    currentMode = "HAND WAVE";
+    move_speed = 1.0f;
+    if (site_now[3][1] == Y_START) {
+        body_right(15);
+        x_tmp = site_now[2][0]; y_tmp = site_now[2][1]; z_tmp = site_now[2][2];
+        move_speed = BODY_MOVE_SPEED;
+        for (int j = 0; j < i && !stopRequested; j++) {
+            set_site(2, turn_x1, turn_y1, 50);
+            wait_all_reach();
+            set_site(2, turn_x0, turn_y0, 50);
+            wait_all_reach();
+        }
+        set_site(2, x_tmp, y_tmp, z_tmp);
+        wait_all_reach();
+        move_speed = 1.0f;
+        body_left(15);
+    } else {
+        body_left(15);
+        x_tmp = site_now[0][0]; y_tmp = site_now[0][1]; z_tmp = site_now[0][2];
+        move_speed = BODY_MOVE_SPEED;
+        for (int j = 0; j < i && !stopRequested; j++) {
+            set_site(0, turn_x1, turn_y1, 50);
+            wait_all_reach();
+            set_site(0, turn_x0, turn_y0, 50);
+            wait_all_reach();
+        }
+        set_site(0, x_tmp, y_tmp, z_tmp);
+        wait_all_reach();
+        move_speed = 1.0f;
+        body_right(15);
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+void hand_shake(int i) {
+    float x_tmp, y_tmp, z_tmp;
+    currentMode = "HAND SHAKE";
+    move_speed = 1.0f;
+    if (site_now[3][1] == Y_START) {
+        body_right(15);
+        x_tmp = site_now[2][0]; y_tmp = site_now[2][1]; z_tmp = site_now[2][2];
+        move_speed = BODY_MOVE_SPEED;
+        for (int j = 0; j < i && !stopRequested; j++) {
+            set_site(2, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 55);
+            wait_all_reach();
+            set_site(2, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 10);
+            wait_all_reach();
+        }
+        set_site(2, x_tmp, y_tmp, z_tmp);
+        wait_all_reach();
+        move_speed = 1.0f;
+        body_left(15);
+    } else {
+        body_left(15);
+        x_tmp = site_now[0][0]; y_tmp = site_now[0][1]; z_tmp = site_now[0][2];
+        move_speed = BODY_MOVE_SPEED;
+        for (int j = 0; j < i && !stopRequested; j++) {
+            set_site(0, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 55);
+            wait_all_reach();
+            set_site(0, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 10);
+            wait_all_reach();
+        }
+        set_site(0, x_tmp, y_tmp, z_tmp);
+        wait_all_reach();
+        move_speed = 1.0f;
+        body_right(15);
+    }
+    if (!stopRequested) currentMode = "STAND";
+}
+
+// Action Dispatcher
+struct ActionRequest {
+    char action[20];
+    int steps;
+    float speed;
+};
+
+QueueHandle_t actionQueue = NULL;
+
+void actionTask(void* parameter) {
+    ActionRequest req;
+    for (;;) {
+        if (xQueueReceive(actionQueue, &req, portMAX_DELAY) == pdTRUE) {
+            isActionRunning = true;
+            stopRequested = false;
+            speed_multiple = req.speed > 0 ? req.speed : 1.0f;
+            String act = String(req.action);
+
+            Serial.printf("[ACTION] Starting '%s' (%d steps, %.1fx speed)\n", act.c_str(), req.steps, speed_multiple);
+
+            if (act == "forward") {
+                if (!is_stand()) stand();
+                step_forward(req.steps);
+            } else if (act == "backward" || act == "back") {
+                if (!is_stand()) stand();
+                step_back(req.steps);
+            } else if (act == "turn_left" || act == "left") {
+                if (!is_stand()) stand();
+                turn_left(req.steps);
+            } else if (act == "turn_right" || act == "right") {
+                if (!is_stand()) stand();
+                turn_right(req.steps);
+            } else if (act == "stand") {
+                stand();
+            } else if (act == "sit") {
+                sit();
+            } else if (act == "hand_shake" || act == "shake") {
+                if (!is_stand()) stand();
+                hand_shake(req.steps);
+            } else if (act == "hand_wave" || act == "wave") {
+                if (!is_stand()) stand();
+                hand_wave(req.steps);
+            } else if (act == "stop") {
+                stopRequested = true;
+                currentMode = "STOPPED";
+            }
+
+            isActionRunning = false;
+            Serial.printf("[ACTION] Finished '%s'\n", act.c_str());
+        }
+    }
+}
+
+void executeAction(const String& act, int steps, float spd) {
+    if (act == "stop") {
+        stopRequested = true;
+        currentMode = "STOPPED";
+        return;
+    }
+    ActionRequest req;
+    strncpy(req.action, act.c_str(), sizeof(req.action) - 1);
+    req.action[sizeof(req.action) - 1] = '\0';
+    req.steps = (steps > 0) ? steps : 1;
+    req.speed = (spd > 0) ? spd : 1.0f;
+    xQueueSend(actionQueue, &req, 0);
+}
+
+// ==========================================
+// Serial Command Interface (Nano Bluetooth backwards compatibility)
+// ==========================================
+// Format: "w <action_mode> <steps>"
+// w 0 1: stand | w 0 0: sit | w 1 x: fwd | w 2 x: back | w 3 x: right | w 4 x: left | w 5 x: shake | w 6 x: wave
+void parseSerialCommand(const String& cmd) {
+    String trimmed = cmd;
+    trimmed.trim();
+    if (trimmed.length() == 0) return;
+
+    if (trimmed.startsWith("w ") || trimmed.startsWith("W ")) {
+        int firstSpace = trimmed.indexOf(' ');
+        int secondSpace = trimmed.indexOf(' ', firstSpace + 1);
+        if (firstSpace > 0) {
+            int mode = trimmed.substring(firstSpace + 1, secondSpace > 0 ? secondSpace : trimmed.length()).toInt();
+            int steps = (secondSpace > 0) ? trimmed.substring(secondSpace + 1).toInt() : 1;
+
+            switch (mode) {
+                case 0:
+                    if (steps) executeAction("stand", 1, 1.0f);
+                    else executeAction("sit", 1, 1.0f);
+                    break;
+                case 1: executeAction("forward", steps, 1.0f); break;
+                case 2: executeAction("backward", steps, 1.0f); break;
+                case 3: executeAction("turn_right", steps, 1.0f); break;
+                case 4: executeAction("turn_left", steps, 1.0f); break;
+                case 5: executeAction("hand_shake", steps, 1.0f); break;
+                case 6: executeAction("hand_wave", steps, 1.0f); break;
+                default: Serial.println(F("[CMD] Unknown action code")); break;
+            }
+        }
+    } else if (trimmed.equalsIgnoreCase("stand")) {
+        executeAction("stand", 1, 1.0f);
+    } else if (trimmed.equalsIgnoreCase("sit")) {
+        executeAction("sit", 1, 1.0f);
+    } else if (trimmed.equalsIgnoreCase("stop")) {
+        executeAction("stop", 1, 1.0f);
     }
 }
 
@@ -247,17 +833,15 @@ void setLegJointAngle(int leg, int joint, int angle) {
 void drawSplashScreen() {
     if (!oledReady) return;
     display.clearDisplay();
-    
-    // Header Banner
     display.fillRect(0, 0, SCREEN_WIDTH, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
     display.setTextSize(1);
-    display.setCursor(18, 3);
+    display.setCursor(12, 3);
     display.print(F("ARK-BOT ROBOT"));
 
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(4, 18);
-    display.println(F("XIAO ESP32-C6 (WiFi 6)"));
+    display.println(F("Action Commander v1.0"));
     display.setCursor(4, 30);
     display.print(F("Ant: "));
     display.println(useExternalAntenna ? F("External (IPEX)") : F("Internal Ceramic"));
@@ -267,222 +851,55 @@ void drawSplashScreen() {
     display.display();
 }
 
-void drawPcaMissingScreen(bool blinkState) {
-    if (!oledReady) return;
-    display.clearDisplay();
-
-    // Inverted Header Banner
-    display.fillRect(0, 0, SCREEN_WIDTH, 13, SSD1306_WHITE);
-    display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
-    display.setTextSize(1);
-    display.setCursor(6, 3);
-    display.println(F("! HARDWARE WARNING !"));
-
-    // Status
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 16);
-    display.print(F("PCA9685: "));
-    if (blinkState) {
-        display.println(F("[MISSING]"));
-    } else {
-        display.println(F("[OFFLINE]"));
-    }
-
-    display.setCursor(0, 27);
-    display.println(F("I2C Addr 0x40 offline"));
-
-    display.drawFastHLine(0, 39, SCREEN_WIDTH, SSD1306_WHITE);
-
-    // Help Text
-    display.setCursor(0, 43);
-    display.println(F("Check SDA:D4 / SCL:D5"));
-    display.setCursor(0, 54);
-    display.println(F("Connect PCA driver"));
-
-    display.display();
-}
-
-void updateCalibrationProgress(int leg, int joint, int progressPercent) {
-    if (!oledReady) return;
-    display.clearDisplay();
-
-    // Title
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(8, 2);
-    display.println(F("ARK-BOT CALIBRATE"));
-    display.drawFastHLine(0, 12, SCREEN_WIDTH, SSD1306_WHITE);
-
-    // Current Target
-    display.setCursor(0, 18);
-    display.print(F("Leg: "));
-    display.print(LEG_NAMES[leg]);
-    display.print(F(" ("));
-    display.print(LEG_FULL_NAMES[leg]);
-    display.println(F(")"));
-
-    display.setCursor(0, 30);
-    display.print(F("Joint: "));
-    display.print(JOINT_NAMES[joint]);
-    display.print(F(" [Ch "));
-    display.print(SERVO_CHANNELS[leg][joint]);
-    display.println(F("]"));
-
-    display.setCursor(0, 42);
-    display.print(F("Angle: 90 deg (CENTER)"));
-
-    // Progress Bar
-    display.drawRect(0, 54, 128, 8, SSD1306_WHITE);
-    int barWidth = map(progressPercent, 0, 100, 0, 124);
-    display.fillRect(2, 56, barWidth, 4, SSD1306_WHITE);
-
-    display.display();
-}
-
 void drawMainDashboard(bool heartbeat, int cycleIndex) {
     if (!oledReady) return;
     display.clearDisplay();
 
-    // Top status line
+    // Top Header
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(0, 0);
-    display.print(F("ARK-BOT "));
-    
-    // Heartbeat indicator
-    if (heartbeat) {
-        display.fillCircle(123, 3, 2, SSD1306_WHITE);
-    } else {
-        display.drawCircle(123, 3, 2, SSD1306_WHITE);
-    }
+    display.print(F("ARK-BOT v1.0 "));
+    if (heartbeat) display.fillCircle(123, 3, 2, SSD1306_WHITE);
+    else display.drawCircle(123, 3, 2, SSD1306_WHITE);
     display.drawFastHLine(0, 9, SCREEN_WIDTH, SSD1306_WHITE);
 
-    // Grid for 4 legs (FR, FL, RR, RL)
+    // Matrix display
     const int colX[2] = {0, 66};
     const int rowY[2] = {12, 32};
-
     for (int l = 0; l < NUM_LEGS; l++) {
-        int col = l % 2;
-        int row = l / 2;
-        int x = colX[col];
-        int y = rowY[row];
-
+        int x = colX[l % 2];
+        int y = rowY[l / 2];
         display.setCursor(x, y);
-        display.print(LEG_NAMES[l]);
-        display.print(F(":"));
-
+        display.print(LEG_NAMES[l]); display.print(F(":"));
         display.setCursor(x, y + 9);
-        display.print(currentAngles[l][0]);
-        display.print(F("/"));
-        display.print(currentAngles[l][1]);
-        display.print(F("/"));
+        display.print(currentAngles[l][0]); display.print(F("/"));
+        display.print(currentAngles[l][1]); display.print(F("/"));
         display.print(currentAngles[l][2]);
     }
 
     display.drawFastHLine(0, 52, SCREEN_WIDTH, SSD1306_WHITE);
     display.setCursor(0, 55);
-    
-    // Bottom banner cycles: 0 = IP, 1 = Mode, 2 = Antenna & Signal
     if (cycleIndex == 0) {
-        display.print(F("IP: "));
-        display.print(activeIp);
+        display.print(F("IP: ")); display.print(activeIp);
     } else if (cycleIndex == 1) {
-        display.print(F("MD: "));
-        display.print(currentMode);
+        display.print(F("MD: ")); display.print(currentMode);
     } else {
         display.print(useExternalAntenna ? F("ANT:EXT ") : F("ANT:INT "));
         if (wifiStaConnected) {
-            display.print(WiFi.RSSI());
-            display.print(F("dBm"));
+            display.print(WiFi.RSSI()); display.print(F("dBm"));
         } else {
             display.print(F("AP"));
         }
     }
-
     display.display();
 }
 
 // ==========================================
-// Initialization & Calibration Routines
+// Web Server API Handlers
 // ==========================================
-bool initPCA9685() {
-    if (!probeI2C(PCA9685_I2C_ADDRESS)) {
-        return false;
-    }
-    pwm.begin();
-    pwm.setOscillatorFrequency(27000000);  // 27MHz internal oscillator
-    pwm.setPWMFreq(SERVO_FREQ);            // 50Hz for standard servos
-    return true;
-}
-
-void calibrateAllServos(bool sequential) {
-    Serial.println(F("\n[ARK-BOT] Initializing / Centering all 12 leg joints to 90 degrees..."));
-
-    int totalServos = NUM_LEGS * SERVOS_PER_LEG;
-    int count = 0;
-
-    for (int i = 0; i < NUM_LEGS; i++) {
-        for (int j = 0; j < SERVOS_PER_LEG; j++) {
-            count++;
-            int progress = (count * 100) / totalServos;
-
-            setLegJointAngle(i, j, DEFAULT_CALIBRATION_ANGLE);
-            servoEnabled[i][j] = true;
-
-            if (sequential) {
-                updateCalibrationProgress(i, j, progress);
-                playStepChime();
-                delay(90);
-            }
-        }
-    }
-
-    currentMode = "ALL @ 90deg";
-    playReadyChime();
-    Serial.println(F("[SUCCESS] All 12 servos calibrated at 90 deg neutral position."));
-    drawMainDashboard(true, 0);
-}
-
-// ==========================================
-// Helpers for JSON and Wi-Fi
-// ==========================================
-String escapeJson(const String& s) {
-    String res = "";
-    for (size_t i = 0; i < s.length(); i++) {
-        char c = s[i];
-        if (c == '"') res += "\\\"";
-        else if (c == '\\') res += "\\\\";
-        else if (c == '\b') res += "\\b";
-        else if (c == '\f') res += "\\f";
-        else if (c == '\n') res += "\\n";
-        else if (c == '\r') res += "\\r";
-        else if (c == '\t') res += "\\t";
-        else res += c;
-    }
-    return res;
-}
-
-String getAuthModeName(wifi_auth_mode_t authMode) {
-    switch (authMode) {
-        case WIFI_AUTH_OPEN: return "Open";
-        case WIFI_AUTH_WEP: return "WEP";
-        case WIFI_AUTH_WPA_PSK: return "WPA";
-        case WIFI_AUTH_WPA2_PSK: return "WPA2";
-        case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/WPA2";
-        case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Ent";
-        case WIFI_AUTH_WPA3_PSK: return "WPA3";
-        case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
-        default: return "Unknown";
-    }
-}
-
-// ==========================================
-// Web Server API & Page Handlers
-// ==========================================
-void handleRoot() {
-    // Redirect root to /calib
-    server.sendHeader("Location", "/calib");
-    server.send(302, "text/plain", "Redirecting to /calib...");
+void handleCommander() {
+    server.send_P(200, "text/html", COMMANDER_HTML);
 }
 
 void handleCalib() {
@@ -499,6 +916,7 @@ void handleStatus() {
     json += "\"version\":\"" + String(ROBOT_VERSION) + "\",";
     json += "\"pcaReady\":" + String(pcaReady ? "true" : "false") + ",";
     json += "\"mode\":\"" + currentMode + "\",";
+    json += "\"moving\":" + String(isActionRunning ? "true" : "false") + ",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
     json += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
@@ -516,7 +934,7 @@ void handleStatus() {
     }
     json += "],";
 
-    // Power enabled matrix
+    // Power matrix
     json += "\"enabled\":[";
     for (int l = 0; l < NUM_LEGS; l++) {
         json += "[";
@@ -533,92 +951,27 @@ void handleStatus() {
     server.send(200, "application/json", json);
 }
 
-void handleWifiScan() {
+void handleAction() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    Serial.println(F("[WiFi] Scanning 2.4GHz Wi-Fi networks..."));
-    
-    int n = WiFi.scanNetworks(false, false);
-    String json = "[";
-    for (int i = 0; i < n; ++i) {
-        if (i > 0) json += ",";
-        json += "{";
-        json += "\"ssid\":\"" + escapeJson(WiFi.SSID(i)) + "\",";
-        json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
-        json += "\"channel\":" + String(WiFi.channel(i)) + ",";
-        json += "\"auth\":\"" + getAuthModeName(WiFi.encryptionType(i)) + "\",";
-        json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED && WiFi.SSID(i) == WiFi.SSID() ? "true" : "false");
-        json += "}";
-    }
-    json += "]";
-    WiFi.scanDelete();
-
-    Serial.printf("[WiFi] Scan complete. Found %d networks.\n", n);
-    server.send(200, "application/json", json);
-}
-
-void handleWifiStatus() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    bool isConnected = (WiFi.status() == WL_CONNECTED);
-
-    String json = "{";
-    json += "\"connected\":" + String(isConnected ? "true" : "false") + ",";
-    json += "\"staSsid\":\"" + escapeJson(isConnected ? WiFi.SSID() : staSsid) + "\",";
-    json += "\"staIp\":\"" + (isConnected ? WiFi.localIP().toString() : "") + "\",";
-    json += "\"apSsid\":\"" + String(WIFI_AP_SSID) + "\",";
-    json += "\"apIp\":\"" + WiFi.softAPIP().toString() + "\",";
-    json += "\"mac\":\"" + WiFi.macAddress() + "\",";
-    json += "\"hostname\":\"" + String(MDNS_HOSTNAME) + ".local\",";
-    json += "\"rssi\":" + String(isConnected ? WiFi.RSSI() : 0) + ",";
-    json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
-    json += "\"uptime\":" + String(millis() / 1000);
-    json += "}";
-
-    server.send(200, "application/json", json);
-}
-
-void handleWifiSave() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    if (!server.hasArg("ssid")) {
-        server.send(400, "application/json", "{\"error\":\"Missing 'ssid' parameter\"}");
+    if (!server.hasArg("action")) {
+        server.send(400, "application/json", "{\"error\":\"Missing 'action' parameter\"}");
         return;
     }
 
-    String newSsid = server.arg("ssid");
-    String newPass = server.hasArg("pass") ? server.arg("pass") : "";
+    String act = server.arg("action");
+    int steps = server.hasArg("steps") ? server.arg("steps").toInt() : 1;
+    float spd = server.hasArg("speed") ? server.arg("speed").toFloat() : 1.0f;
 
-    saveWifiConfig(newSsid, newPass);
+    executeAction(act, steps, spd);
     playStepChime();
 
-    server.send(200, "application/json", "{\"success\":true,\"message\":\"Wi-Fi credentials saved. Connecting...\"}");
-    
-    // Asynchronously begin connection to newly configured network
-    connectWifi(newSsid, newPass, 5000);
-}
-
-void handleWifiReconnect() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", "{\"success\":true,\"message\":\"Reconnecting to saved Wi-Fi...\"}");
-    connectWifi(staSsid, staPass, 5000);
-}
-
-void handleWifiReset() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    resetWifiConfig();
-    playStepChime();
-    server.send(200, "application/json", "{\"success\":true,\"message\":\"Wi-Fi credentials reset to default\"}");
-}
-
-void handleReboot() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", "{\"success\":true,\"message\":\"Restarting ESP32 controller...\"}");
-    delay(400);
-    ESP.restart();
+    server.send(200, "application/json", "{\"status\":\"accepted\",\"action\":\"" + act + "\"}");
 }
 
 void handleSetAntenna() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     if (!server.hasArg("type")) {
-        server.send(400, "application/json", "{\"error\":\"Missing 'type' parameter ('internal' or 'external')\"}");
+        server.send(400, "application/json", "{\"error\":\"Missing 'type' parameter\"}");
         return;
     }
 
@@ -643,12 +996,13 @@ void handleSetServo() {
     int angle = server.arg("angle").toInt();
 
     if (leg < 0 || leg >= NUM_LEGS || joint < 0 || joint >= SERVOS_PER_LEG) {
-        server.send(400, "application/json", "{\"error\":\"Invalid leg or joint index\"}");
+        server.send(400, "application/json", "{\"error\":\"Invalid index\"}");
         return;
     }
 
-    setLegJointAngle(leg, joint, angle);
-    currentMode = "MANUAL CONTROL";
+    currentAngles[leg][joint] = constrain(angle, 0, 180);
+    servoEnabled[leg][joint] = true;
+    setServoAngle(SERVO_CHANNELS[leg][joint], currentAngles[leg][joint]);
 
     server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
@@ -667,22 +1021,21 @@ void handlePower() {
         int leg = server.arg("leg").toInt();
         int joint = server.arg("joint").toInt();
         setServoPower(leg, joint, state);
-        currentMode = String(LEG_NAMES[leg]) + " J" + String(joint) + (state ? " ON" : " OFF");
     }
-
     handleStatus();
 }
 
 void handleInit() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    String type = server.hasArg("type") ? server.arg("type") : "all";
-
-    if (type == "wave") {
-        calibrateAllServos(true);
-    } else {
-        calibrateAllServos(false);
+    for (int l = 0; l < NUM_LEGS; l++) {
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
+            currentAngles[l][j] = DEFAULT_CALIBRATION_ANGLE;
+            servoEnabled[l][j] = true;
+            setServoAngle(SERVO_CHANNELS[l][j], 90);
+        }
     }
-
+    currentMode = "ALL @ 90deg";
+    playReadyChime();
     handleStatus();
 }
 
@@ -692,55 +1045,165 @@ void handleBeep() {
     server.send(200, "application/json", "{\"status\":\"beeped\"}");
 }
 
+// Wi-Fi Helper Functions
+String escapeJsonStr(const String& s) {
+    String res = "";
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (c == '"') res += "\\\"";
+        else if (c == '\\') res += "\\\\";
+        else res += c;
+    }
+    return res;
+}
+
+String getAuthModeString(wifi_auth_mode_t authMode) {
+    switch (authMode) {
+        case WIFI_AUTH_OPEN: return "Open";
+        case WIFI_AUTH_WEP: return "WEP";
+        case WIFI_AUTH_WPA_PSK: return "WPA";
+        case WIFI_AUTH_WPA2_PSK: return "WPA2";
+        case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/WPA2";
+        case WIFI_AUTH_WPA3_PSK: return "WPA3";
+        default: return "WPA2";
+    }
+}
+
+void handleWifiScan() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    int n = WiFi.scanNetworks(false, false);
+    String json = "[";
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) json += ",";
+        json += "{";
+        json += "\"ssid\":\"" + escapeJsonStr(WiFi.SSID(i)) + "\",";
+        json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
+        json += "\"channel\":" + String(WiFi.channel(i)) + ",";
+        json += "\"auth\":\"" + getAuthModeString(WiFi.encryptionType(i)) + "\",";
+        json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED && WiFi.SSID(i) == WiFi.SSID() ? "true" : "false");
+        json += "}";
+    }
+    json += "]";
+    WiFi.scanDelete();
+    server.send(200, "application/json", json);
+}
+
+void handleWifiStatus() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+    String json = "{";
+    json += "\"connected\":" + String(isConnected ? "true" : "false") + ",";
+    json += "\"staSsid\":\"" + escapeJsonStr(isConnected ? WiFi.SSID() : staSsid) + "\",";
+    json += "\"staIp\":\"" + (isConnected ? WiFi.localIP().toString() : "") + "\",";
+    json += "\"apSsid\":\"" + String(WIFI_AP_SSID) + "\",";
+    json += "\"apIp\":\"" + WiFi.softAPIP().toString() + "\",";
+    json += "\"mac\":\"" + WiFi.macAddress() + "\",";
+    json += "\"hostname\":\"" + String(MDNS_HOSTNAME) + ".local\",";
+    json += "\"rssi\":" + String(isConnected ? WiFi.RSSI() : 0) + ",";
+    json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
+    json += "\"uptime\":" + String(millis() / 1000);
+    json += "}";
+    server.send(200, "application/json", json);
+}
+
+void handleWifiSave() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (!server.hasArg("ssid")) {
+        server.send(400, "application/json", "{\"error\":\"Missing 'ssid' parameter\"}");
+        return;
+    }
+    staSsid = server.arg("ssid");
+    staPass = server.hasArg("pass") ? server.arg("pass") : "";
+    
+    preferences.begin("ark_wifi", false);
+    preferences.putString("ssid", staSsid);
+    preferences.putString("pass", staPass);
+    preferences.end();
+
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Credentials saved. Connecting...\"}");
+    WiFi.disconnect();
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
+}
+
+void handleWifiReconnect() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Reconnecting...\"}");
+    WiFi.disconnect();
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
+}
+
+void handleWifiReset() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    preferences.begin("ark_wifi", false);
+    preferences.clear();
+    preferences.end();
+    staSsid = WIFI_STA_SSID;
+    staPass = WIFI_STA_PASS;
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Reset to defaults\"}");
+}
+
+void handleReboot() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
+    delay(400);
+    ESP.restart();
+}
+
 // ==========================================
 // Setup & Loop
 // ==========================================
 void setup() {
     Serial.begin(115200);
 
-    // Initialize all servo states
-    for (int l = 0; l < NUM_LEGS; l++) {
-        for (int j = 0; j < SERVOS_PER_LEG; j++) {
-            currentAngles[l][j] = DEFAULT_CALIBRATION_ANGLE;
-            servoEnabled[l][j] = true;
-        }
-    }
-
-    // Initialize buzzer with ESP32 LEDC PWM
     initBuzzer();
-
-    // Initialize Seeed Studio XIAO ESP32-C6 RF Antenna configuration
     initAntenna();
+    initKinematics();
 
-    // Load persistent Wi-Fi configuration from NVS
-    loadWifiConfig();
+    // Preferences: Wi-Fi
+    preferences.begin("ark_wifi", false);
+    staSsid = preferences.getString("ssid", WIFI_STA_SSID);
+    staPass = preferences.getString("pass", WIFI_STA_PASS);
+    preferences.end();
 
-    delay(400);
+    delay(300);
     Serial.println(F("\n=========================================="));
-    Serial.println(F("         ARK-BOT QUADRUPED SYSTEM         "));
-    Serial.println(F("    Visual Calibrator & Setup (v0.1.2)    "));
+    Serial.println(F("      ARK-BOT CYBER MOTION COMMANDER      "));
+    Serial.println(F("         Version 1.0.0 (ESP32-C6)         "));
     Serial.println(F("=========================================="));
 
-    // 1. Initialize Wi-Fi (Connect to Home WiFi + SoftAP Fallback)
+    // Wi-Fi Setup
     WiFi.mode(WIFI_AP_STA);
-    
-    // Start SoftAP as fallback
     WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL, 0, WIFI_MAX_CONN);
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
 
-    // Connect to configured Wi-Fi network
-    connectWifi(staSsid, staPass, 6000);
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 5000) {
+        delay(250);
+        Serial.print(F("."));
+    }
+    Serial.println();
 
-    // Initialize mDNS
-    if (MDNS.begin(MDNS_HOSTNAME)) {
-        MDNS.addService("http", "tcp", 80);
-        Serial.printf("[OK] mDNS responder started: http://%s.local\n", MDNS_HOSTNAME);
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiStaConnected = true;
+        activeIp = WiFi.localIP().toString();
+        Serial.printf("[OK] Connected to %s! IP: %s\n", staSsid.c_str(), activeIp.c_str());
+    } else {
+        wifiStaConnected = false;
+        activeIp = WiFi.softAPIP().toString();
+        Serial.println(F("[WARN] Home Wi-Fi offline. Using SoftAP mode."));
     }
 
-    // 2. Configure Web Server Routes
-    server.on("/", HTTP_GET, handleRoot);
+    if (MDNS.begin(MDNS_HOSTNAME)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.printf("[OK] mDNS: http://%s.local\n", MDNS_HOSTNAME);
+    }
+
+    // Web Routes
+    server.on("/", HTTP_GET, handleCommander);
     server.on("/calib", HTTP_GET, handleCalib);
     server.on("/setup", HTTP_GET, handleSetup);
     server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/action", HTTP_POST, handleAction);
     server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
     server.on("/api/wifi/status", HTTP_GET, handleWifiStatus);
     server.on("/api/wifi/save", HTTP_POST, handleWifiSave);
@@ -753,88 +1216,83 @@ void setup() {
     server.on("/api/init", HTTP_POST, handleInit);
     server.on("/api/beep", HTTP_POST, handleBeep);
     server.begin();
-    Serial.println(F("[OK] HTTP Web Server started on port 80"));
+    Serial.println(F("[OK] Web Server started on port 80"));
 
-    // 3. Initialize I2C Bus (SDA: D4/GPIO22, SCL: D5/GPIO23)
+    // I2C Bus & OLED
     Wire.begin();
-
-    // 4. Initialize OLED Display
     if (display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDRESS)) {
         oledReady = true;
-        Serial.println(F("[OK] SSD1306 OLED initialized (0x3C)"));
         drawSplashScreen();
-    } else {
-        Serial.println(F("[FAIL] SSD1306 OLED not found at 0x3C!"));
     }
 
-    // Play boot melody
     playBootChime();
 
-    // 5. Probe and Initialize PCA9685
-    if (initPCA9685()) {
+    // PCA9685
+    if (probeI2C(PCA9685_I2C_ADDRESS)) {
+        pwm.begin();
+        pwm.setOscillatorFrequency(27000000);
+        pwm.setPWMFreq(SERVO_FREQ);
         pcaReady = true;
-        Serial.println(F("[OK] PCA9685 Servo Driver initialized (0x40) at 50Hz"));
-        delay(600);
-        calibrateAllServos(true);
+        Serial.println(F("[OK] PCA9685 Driver initialized (0x40)"));
     } else {
         pcaReady = false;
-        Serial.println(F("[FAIL] PCA9685 NOT found at I2C address 0x40!"));
+        Serial.println(F("[FAIL] PCA9685 NOT found!"));
         playErrorChime();
-        drawPcaMissingScreen(true);
     }
+
+    // Create FreeRTOS Tasks
+    actionQueue = xQueueCreate(8, sizeof(ActionRequest));
+    
+    xTaskCreatePinnedToCore(
+        kinematicsTask,
+        "KinematicsTask",
+        4096,
+        NULL,
+        2, // High priority
+        &kinematicsTaskHandle,
+        0
+    );
+
+    xTaskCreatePinnedToCore(
+        actionTask,
+        "ActionTask",
+        4096,
+        NULL,
+        1, // Normal priority
+        &actionTaskHandle,
+        0
+    );
+
+    // Initial Stand
+    delay(500);
+    executeAction("stand", 1, 1.0f);
+    Serial.println(F("[OK] ARK-BOT System Ready."));
 }
 
 void loop() {
-    // Handle incoming Web UI client requests
     server.handleClient();
 
-    // Track Wi-Fi status changes
+    // Serial Command Parsing (HC06 Bluetooth & Serial Commander)
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        parseSerialCommand(cmd);
+    }
+
+    // Wi-Fi State monitor
     bool isConnected = (WiFi.status() == WL_CONNECTED);
     if (isConnected != wifiStaConnected) {
         wifiStaConnected = isConnected;
-        if (wifiStaConnected) {
-            activeIp = WiFi.localIP().toString();
-            Serial.printf("[WiFi] Reconnected! IP: %s\n", activeIp.c_str());
-        } else {
-            activeIp = WiFi.softAPIP().toString();
-            Serial.println(F("[WiFi] Disconnected from Station. Using SoftAP."));
-        }
+        activeIp = isConnected ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
     }
 
-    static unsigned long lastUpdate = 0;
-    static bool blinkState = false;
-    static int cycleCounter = 0;
+    static unsigned long lastOled = 0;
+    static bool blink = false;
+    static int cycle = 0;
 
-    // Refresh every 500ms
-    if (millis() - lastUpdate >= 500) {
-        lastUpdate = millis();
-        blinkState = !blinkState;
-        cycleCounter = (cycleCounter + 1) % 9; // Cycle bottom line every 1.5s (0,1,2, 3,4,5, 6,7,8)
-
-        int cycleIndex = cycleCounter / 3; // 0 = IP, 1 = Mode, 2 = Antenna & RSSI
-
-        if (pcaReady) {
-            // Verify PCA9685 is still connected
-            if (!probeI2C(PCA9685_I2C_ADDRESS)) {
-                pcaReady = false;
-                Serial.println(F("[WARN] PCA9685 disconnected from I2C bus!"));
-                playErrorChime();
-                drawPcaMissingScreen(true);
-            } else {
-                drawMainDashboard(blinkState, cycleIndex);
-            }
-        } else {
-            // PCA not ready: probe I2C 0x40 for hot-plug reconnection
-            if (probeI2C(PCA9685_I2C_ADDRESS)) {
-                Serial.println(F("[OK] PCA9685 detected! Initializing..."));
-                if (initPCA9685()) {
-                    pcaReady = true;
-                    calibrateAllServos(true);
-                    drawMainDashboard(true, 0);
-                }
-            } else {
-                drawPcaMissingScreen(blinkState);
-            }
-        }
+    if (millis() - lastOled >= 500) {
+        lastOled = millis();
+        blink = !blink;
+        cycle = (cycle + 1) % 9;
+        drawMainDashboard(blink, cycle / 3);
     }
 }
