@@ -41,6 +41,8 @@ class TelemetryPanel(QWidget):
         self.lbl_mode = QLabel("Mode: STAND")
         self.lbl_packets = QLabel("Packets: 0")
         self.lbl_vbat = QLabel("Battery: -- V")
+        self.lbl_imu = QLabel("IMU (MPU6050): Checking...")
+        self.lbl_imu_att = QLabel("Attitude: P: 0.0° R: 0.0°")
 
         diag_layout.addWidget(self.lbl_robot, 0, 0)
         diag_layout.addWidget(self.lbl_ver, 0, 1)
@@ -48,6 +50,8 @@ class TelemetryPanel(QWidget):
         diag_layout.addWidget(self.lbl_mode, 1, 0)
         diag_layout.addWidget(self.lbl_packets, 1, 1)
         diag_layout.addWidget(self.lbl_vbat, 1, 2)
+        diag_layout.addWidget(self.lbl_imu, 2, 0)
+        diag_layout.addWidget(self.lbl_imu_att, 2, 1, 1, 2)
 
         main_layout.addWidget(diag_group)
 
@@ -145,6 +149,15 @@ class TelemetryPanel(QWidget):
                     self.lbl_vbat.setStyleSheet("color: #10b981; font-weight: bold;")
             except (ValueError, TypeError):
                 pass
+
+        if "imu" in telem and isinstance(telem["imu"], dict):
+            imu = telem["imu"]
+            ready = bool(imu.get("ready", False))
+            self.lbl_imu.setText("IMU (MPU6050): ONLINE" if ready else "IMU (MPU6050): OFFLINE")
+            self.lbl_imu.setStyleSheet("color: #10b981;" if ready else "color: #ef4444; font-weight: bold;")
+            pitch = float(imu.get("pitch", 0.0))
+            roll = float(imu.get("roll", 0.0))
+            self.lbl_imu_att.setText(f"Attitude: P: {pitch:+.1f}° | R: {roll:+.1f}°")
 
 
         # Update Table Sites (cols 1, 2, 3)

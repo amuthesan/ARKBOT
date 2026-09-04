@@ -4,6 +4,26 @@ All notable changes to the **ARK-BOT** project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.6] - 2026-09-05
+
+### Added
+- **MPU6050 6-Axis IMU & Attitude Estimator on ESP32-C6 I2C Bus**:
+  - Direct low-overhead I2C register burst sampling (`Wire`) on primary address `0x68` (fallback `0x69`).
+  - Configured digital low-pass filter (`DLPF ~44Hz`), gyroscope sensitivity ($\pm 500^\circ/\text{s}$), and accelerometer sensitivity ($\pm 4\text{g}$).
+  - 50Hz Complementary Filter sensor fusion combining $98\%$ high-rate gyro integration with $2\%$ accelerometer gravity reference to deliver smooth, drift-free **Pitch** and **Roll** angles.
+  - Zero Level Tare Calibration routine (`calibrateMPU6050()`) averaging 80 samples and saving persistent pitch/roll offsets and gyro biases to NVS (`ark_cfg`).
+- **Web UI Cyber Artificial Horizon Instrument (`/` & `/calib`)**:
+  - Built high-contrast circular Attitude Director Indicator (ADI) vector canvas widget with sky/ground division, white pitch ladder markings ($\pm 10^\circ, \pm 20^\circ, \pm 30^\circ$), yellow aircraft reference reticle, and top roll bank index markers.
+  - Dynamic 3D Kinematics visualizer integration: physical robot pitch and roll angles tilt the 3D projected quadruped chassis in real time.
+  - Added one-click **🎯 Zero IMU** calibration button calling `/api/imu/calibrate`.
+- **Python Desktop Companion GUI Artificial Horizon (`gui/horizon_widget.py`)**:
+  - Vector-rendered `QPainter` Artificial Horizon avionics gauge embedded in `CommanderPanel` and `TelemetryPanel`.
+  - Real-time attitude synchronization in both USB Serial streaming and Wi-Fi modes.
+  - 3D Kinematics Viewport (`Viewport3D`) with dynamic attitude body tilting based on live IMU orientation.
+- **Multi-Interface IMU Telemetry**:
+  - **OLED Dashboard**: Added IMU orientation cycle (`IMU: P:XX R:XX`).
+  - **Telemetry API & Serial Stream**: Extended `/api/status` and 20Hz Serial JSON with complete `"imu"` object (`ready`, `pitch`, `roll`, `ax`, `ay`, `az`, `gx`, `gy`, `gz`).
+
 ## [v1.0.5] - 2026-09-05
 
 ### Added

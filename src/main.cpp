@@ -89,6 +89,18 @@ float batteryMultiplier = DEFAULT_BATTERY_MULTIPLIER;
 float batteryVoltage = 0.0f;
 float rawDividerVoltage = 0.0f;
 
+// MPU6050 6-Axis IMU State & Attitude
+bool imuReady = false;
+uint8_t imuAddress = MPU6050_I2C_ADDRESS;
+float imuPitch = 0.0f;
+float imuRoll = 0.0f;
+float imuAx = 0.0f, imuAy = 0.0f, imuAz = 1.0f;
+float imuGx = 0.0f, imuGy = 0.0f, imuGz = 0.0f;
+float imuPitchOffset = 0.0f;
+float imuRollOffset = 0.0f;
+float imuGxOffset = 0.0f, imuGyOffset = 0.0f, imuGzOffset = 0.0f;
+unsigned long lastImuSampleMicros = 0;
+
 // Kinematics active flag: ONLY true when running an action (Stand, Sit, Walk, etc.)
 // When in Calibration mode, this is false so calibration 90° and sliders are NEVER overwritten!
 volatile bool kinematicsActive = false;
@@ -104,6 +116,10 @@ TaskHandle_t kinematicsTaskHandle = NULL;
 TaskHandle_t actionTaskHandle = NULL;
 
 // Forward Declarations
+bool probeI2C(uint8_t address);
+void initMPU6050();
+void sampleMPU6050();
+void calibrateMPU6050();
 void sampleBatteryVoltage();
 void playStepChime();
 void playReadyChime();
@@ -197,6 +213,185 @@ void initBatterySensor() {
     Serial.printf("[BAT] ADC Pin: %d | Multiplier: %.5f\n", BATTERY_ADC_PIN, batteryMultiplier);
     sampleBatteryVoltage();
 }
+
+// ==========================================
+// MPU6050 6-Axis IMU & Attitude Estimator
+// ==========================================
+void sampleMPU6050();
+
+void initMPU6050() {
+    if (probeI2C(MPU6050_I2C_ADDRESS)) {
+        imuAddress = MPU6050_I2C_ADDRESS;
+    } else if (probeI2C(MPU6050_I2C_ALT_ADDRESS)) {
+        imuAddress = MPU6050_I2C_ALT_ADDRESS;
+    } else {
+        imuReady = false;
+        Serial.println(F("[WARN] MPU6050 IMU not found (0x68/0x69)."));
+        return;
+    }
+
+    // Wake up MPU6050 (PWR_MGMT_1 = 0x00)
+    Wire.beginTransmission(imuAddress);
+    Wire.write(0x6B);
+    Wire.write(0x00);
+    if (Wire.endTransmission() != 0) {
+        imuReady = false;
+        return;
+    }
+    delay(10);
+
+    // DLPF Config: ~44Hz low pass filter (CONFIG = 0x03)
+    Wire.beginTransmission(imuAddress);
+    Wire.write(0x1A);
+    Wire.write(0x03);
+    Wire.endTransmission();
+
+    // Gyro Config: +/- 500 deg/s (GYRO_CONFIG = 0x08) -> 65.5 LSB/(deg/s)
+    Wire.beginTransmission(imuAddress);
+    Wire.write(0x1B);
+    Wire.write(0x08);
+    Wire.endTransmission();
+
+    // Accel Config: +/- 4g (ACCEL_CONFIG = 0x08) -> 8192 LSB/g
+    Wire.beginTransmission(imuAddress);
+    Wire.write(0x1C);
+    Wire.write(0x08);
+    Wire.endTransmission();
+
+    // Load Calibration Offsets from Preferences
+    preferences.begin("ark_cfg", false);
+    imuPitchOffset = preferences.getFloat("imu_p_off", 0.0f);
+    imuRollOffset  = preferences.getFloat("imu_r_off", 0.0f);
+    imuGxOffset    = preferences.getFloat("imu_gx_off", 0.0f);
+    imuGyOffset    = preferences.getFloat("imu_gy_off", 0.0f);
+    imuGzOffset    = preferences.getFloat("imu_gz_off", 0.0f);
+    preferences.end();
+
+    imuReady = true;
+    lastImuSampleMicros = micros();
+    Serial.printf("[OK] MPU6050 IMU initialized at 0x%02X\n", imuAddress);
+    sampleMPU6050();
+}
+
+void sampleMPU6050() {
+    if (!imuReady) {
+        static unsigned long lastImuRetry = 0;
+        if (millis() - lastImuRetry >= 3000) {
+            lastImuRetry = millis();
+            if (probeI2C(MPU6050_I2C_ADDRESS) || probeI2C(MPU6050_I2C_ALT_ADDRESS)) {
+                initMPU6050();
+            }
+        }
+        return;
+    }
+
+    // Burst read 14 bytes starting at 0x3B (ACCEL_XOUT_H)
+    Wire.beginTransmission(imuAddress);
+    Wire.write(0x3B);
+    if (Wire.endTransmission(false) != 0) {
+        imuReady = false;
+        return;
+    }
+
+    if (Wire.requestFrom((uint8_t)imuAddress, (size_t)14) != 14) {
+        imuReady = false;
+        return;
+    }
+
+    int16_t rawAx = (Wire.read() << 8) | Wire.read();
+    int16_t rawAy = (Wire.read() << 8) | Wire.read();
+    int16_t rawAz = (Wire.read() << 8) | Wire.read();
+    Wire.read(); Wire.read(); // Skip temperature
+    int16_t rawGx = (Wire.read() << 8) | Wire.read();
+    int16_t rawGy = (Wire.read() << 8) | Wire.read();
+    int16_t rawGz = (Wire.read() << 8) | Wire.read();
+
+    // Convert raw to engineering units (+/- 4g -> 8192 LSB/g, +/- 500 deg/s -> 65.5 LSB/deg/s)
+    imuAx = (float)rawAx / 8192.0f;
+    imuAy = (float)rawAy / 8192.0f;
+    imuAz = (float)rawAz / 8192.0f;
+
+    imuGx = ((float)rawGx / 65.5f) - imuGxOffset;
+    imuGy = ((float)rawGy / 65.5f) - imuGyOffset;
+    imuGz = ((float)rawGz / 65.5f) - imuGzOffset;
+
+    // Calculate Accelerometer Pitch & Roll in degrees
+    float accelRoll  = atan2(imuAy, imuAz) * 57.2957795f;
+    float accelPitch = atan2(-imuAx, sqrt(imuAy * imuAy + imuAz * imuAz)) * 57.2957795f;
+
+    unsigned long nowMicros = micros();
+    float dt = (float)(nowMicros - lastImuSampleMicros) / 1000000.0f;
+    lastImuSampleMicros = nowMicros;
+    if (dt <= 0.0f || dt > 0.2f) dt = 0.02f; // Clamp if paused
+
+    static bool firstImu = true;
+    if (firstImu) {
+        imuRoll = accelRoll - imuRollOffset;
+        imuPitch = accelPitch - imuPitchOffset;
+        firstImu = false;
+    } else {
+        // Complementary Filter: 98% Gyro rate integration + 2% Accel gravity reference
+        imuRoll  = IMU_FILTER_ALPHA * (imuRoll  + imuGx * dt) + (1.0f - IMU_FILTER_ALPHA) * (accelRoll  - imuRollOffset);
+        imuPitch = IMU_FILTER_ALPHA * (imuPitch + imuGy * dt) + (1.0f - IMU_FILTER_ALPHA) * (accelPitch - imuPitchOffset);
+    }
+}
+
+void calibrateMPU6050() {
+    if (!imuReady) return;
+    Serial.println(F("[IMU] Calibrating level zero offsets... Keep robot still."));
+
+    float sumAx = 0, sumAy = 0, sumAz = 0;
+    float sumGx = 0, sumGy = 0, sumGz = 0;
+    const int SAMPLES = 80;
+
+    for (int i = 0; i < SAMPLES; i++) {
+        Wire.beginTransmission(imuAddress);
+        Wire.write(0x3B);
+        Wire.endTransmission(false);
+        if (Wire.requestFrom((uint8_t)imuAddress, (size_t)14) == 14) {
+            int16_t ax = (Wire.read() << 8) | Wire.read();
+            int16_t ay = (Wire.read() << 8) | Wire.read();
+            int16_t az = (Wire.read() << 8) | Wire.read();
+            Wire.read(); Wire.read();
+            int16_t gx = (Wire.read() << 8) | Wire.read();
+            int16_t gy = (Wire.read() << 8) | Wire.read();
+            int16_t gz = (Wire.read() << 8) | Wire.read();
+
+            sumAx += (float)ax / 8192.0f;
+            sumAy += (float)ay / 8192.0f;
+            sumAz += (float)az / 8192.0f;
+            sumGx += (float)gx / 65.5f;
+            sumGy += (float)gy / 65.5f;
+            sumGz += (float)gz / 65.5f;
+        }
+        delay(10);
+    }
+
+    float avgAx = sumAx / SAMPLES;
+    float avgAy = sumAy / SAMPLES;
+    float avgAz = sumAz / SAMPLES;
+
+    imuGxOffset = sumGx / SAMPLES;
+    imuGyOffset = sumGy / SAMPLES;
+    imuGzOffset = sumGz / SAMPLES;
+
+    imuRollOffset  = atan2(avgAy, avgAz) * 57.2957795f;
+    imuPitchOffset = atan2(-avgAx, sqrt(avgAy * avgAy + avgAz * avgAz)) * 57.2957795f;
+
+    imuRoll = 0.0f;
+    imuPitch = 0.0f;
+
+    preferences.begin("ark_cfg", false);
+    preferences.putFloat("imu_p_off", imuPitchOffset);
+    preferences.putFloat("imu_r_off", imuRollOffset);
+    preferences.putFloat("imu_gx_off", imuGxOffset);
+    preferences.putFloat("imu_gy_off", imuGyOffset);
+    preferences.putFloat("imu_gz_off", imuGzOffset);
+    preferences.end();
+
+    Serial.printf("[IMU] Calibrated! Pitch Offset: %.2f deg | Roll Offset: %.2f deg\n", imuPitchOffset, imuRollOffset);
+}
+
 
 
 // ==========================================
@@ -971,6 +1166,17 @@ void sendSerialTelemetryJson() {
     s += ",\"vbat\":"; s += String(batteryVoltage, 2);
     s += ",\"vdiv\":"; s += String(rawDividerVoltage, 3);
     s += ",\"vbat_mult\":"; s += String(batteryMultiplier, 5);
+    s += ",\"imu\":{";
+    s += "\"ready\":"; s += (imuReady ? "true" : "false");
+    s += ",\"pitch\":"; s += String(imuPitch, 1);
+    s += ",\"roll\":"; s += String(imuRoll, 1);
+    s += ",\"ax\":"; s += String(imuAx, 2);
+    s += ",\"ay\":"; s += String(imuAy, 2);
+    s += ",\"az\":"; s += String(imuAz, 2);
+    s += ",\"gx\":"; s += String(imuGx, 1);
+    s += ",\"gy\":"; s += String(imuGy, 1);
+    s += ",\"gz\":"; s += String(imuGz, 1);
+    s += "}";
     s += "}";
     Serial.println(s);
 }
@@ -982,6 +1188,12 @@ void parseSerialCommand(const String& cmd) {
 
     // 1. Structured JSON Command from Companion GUI
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        // IMU Tare / Calibration command: {"calibrate_imu":true} or {"tare_imu":true}
+        if (trimmed.indexOf("\"calibrate_imu\"") >= 0 || trimmed.indexOf("\"tare_imu\"") >= 0) {
+            calibrateMPU6050();
+            return;
+        }
+
         // Battery Multiplier command: {"set_bat_mult": 5.06586}
         int batIdx = trimmed.indexOf("\"set_bat_mult\"");
         if (batIdx >= 0) {
@@ -1183,6 +1395,15 @@ void drawMainDashboard(bool heartbeat, int cycleIndex) {
         display.print(rawDividerVoltage, 2);
         display.print(F("V)"));
     } else if (cycleIndex == 2) {
+        if (imuReady) {
+            display.print(F("IMU: P:"));
+            display.print((int)imuPitch);
+            display.print(F(" R:"));
+            display.print((int)imuRoll);
+        } else {
+            display.print(F("MD: ")); display.print(currentMode);
+        }
+    } else if (cycleIndex == 3) {
         display.print(F("MD: ")); display.print(currentMode);
     } else {
         display.print(useExternalAntenna ? F("ANT:EXT ") : F("ANT:INT "));
@@ -1228,6 +1449,12 @@ void handleSetBatteryMultiplier() {
     server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid multiplier\"}");
 }
 
+void handleCalibrateImu() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    calibrateMPU6050();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"pitch_off\":" + String(imuPitchOffset, 2) + ",\"roll_off\":" + String(imuRollOffset, 2) + "}");
+}
+
 void handleStatus() {
     // Dynamic PCA9685 connection re-probe if state changes
     if (!pcaReady && probeI2C(PCA9685_I2C_ADDRESS)) {
@@ -1264,6 +1491,17 @@ void handleStatus() {
     json += "\"vbat\":" + String(batteryVoltage, 2) + ",";
     json += "\"vdiv\":" + String(rawDividerVoltage, 3) + ",";
     json += "\"vbat_mult\":" + String(batteryMultiplier, 5) + ",";
+    json += "\"imu\":{";
+    json += "\"ready\":" + String(imuReady ? "true" : "false") + ",";
+    json += "\"pitch\":" + String(imuPitch, 1) + ",";
+    json += "\"roll\":" + String(imuRoll, 1) + ",";
+    json += "\"ax\":" + String(imuAx, 2) + ",";
+    json += "\"ay\":" + String(imuAy, 2) + ",";
+    json += "\"az\":" + String(imuAz, 2) + ",";
+    json += "\"gx\":" + String(imuGx, 1) + ",";
+    json += "\"gy\":" + String(imuGy, 1) + ",";
+    json += "\"gz\":" + String(imuGz, 1);
+    json += "},";
     
     // Angles matrix
     json += "\"angles\":[";
@@ -1662,6 +1900,8 @@ void setup() {
     server.on("/api/antenna", HTTP_POST, handleSetAntenna);
     server.on("/api/battery/multiplier", HTTP_POST, handleSetBatteryMultiplier);
     server.on("/api/set_bat_mult", HTTP_POST, handleSetBatteryMultiplier);
+    server.on("/api/imu/calibrate", HTTP_POST, handleCalibrateImu);
+    server.on("/api/calibrate_imu", HTTP_POST, handleCalibrateImu);
     server.on("/api/servo", HTTP_POST, handleSetServo);
     server.on("/api/power", HTTP_POST, handlePower);
     server.on("/api/init", HTTP_POST, handleInit);
@@ -1675,6 +1915,9 @@ void setup() {
         oledReady = true;
         drawSplashScreen();
     }
+
+    // Initialize MPU6050 6-Axis IMU
+    initMPU6050();
 
     playBootChime();
 
@@ -1739,6 +1982,13 @@ void loop() {
                 serialCmdBuf += c;
             }
         }
+    }
+
+    // High-Speed IMU Complementary Filter Sampling (50Hz / 20ms)
+    static unsigned long lastImuSample = 0;
+    if (millis() - lastImuSample >= 20) {
+        lastImuSample = millis();
+        sampleMPU6050();
     }
 
     // Wi-Fi State monitor (throttled to 1s to prevent TCP/IP driver stalls)

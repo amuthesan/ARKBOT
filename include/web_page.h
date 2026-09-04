@@ -14,7 +14,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ARK-BOT Action Commander | v1.0.5</title>
+  <title>ARK-BOT Action Commander | v1.0.6</title>
   <style>
     :root {
       --bg: #070a0f;
@@ -51,7 +51,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
 
     .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     
-    /* RF Antenna Widget */
+    /* RF Antenna & Telemetry Widgets */
     .rf-widget { display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.35); padding: 4px 8px; border-radius: 10px; border: 1px solid var(--card-border); }
     .rf-label { font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
     .rf-btns { display: flex; gap: 3px; }
@@ -65,8 +65,11 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     .badge-offline { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #dc2626; box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
     .badge-busy { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #d97706; box-shadow: 0 0 10px rgba(245, 158, 11, 0.3); }
 
-    /* Visual Simulation Canvas Card */
-    .sim-card { background: radial-gradient(circle at center, #131b2e 0%, #0a0e18 100%); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 16px; position: relative; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
+    /* Visual Simulation & IMU Grid */
+    .tele-sim-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 16px; }
+    @media(min-width: 840px) { .tele-sim-grid { grid-template-columns: 1.65fr 1fr; } }
+
+    .sim-card { background: radial-gradient(circle at center, #131b2e 0%, #0a0e18 100%); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; position: relative; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; justify-content: space-between; }
     .sim-topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
     .sim-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--cyan); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
     .view-toggles { display: flex; gap: 6px; background: rgba(0,0,0,0.3); padding: 3px; border-radius: 8px; border: 1px solid var(--card-border); }
@@ -78,6 +81,17 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     
     .sim-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 11px; color: var(--text-dim); flex-wrap: wrap; gap: 8px; }
     .sim-status { font-weight: 700; color: var(--cyan); }
+
+    /* Artificial Horizon Instrument Panel */
+    .horizon-panel { align-items: center; text-align: center; }
+    .horizon-canvas-wrap { width: 180px; height: 180px; margin: 10px auto; position: relative; border-radius: 50%; box-shadow: 0 0 24px rgba(0, 240, 255, 0.2); }
+    .horizon-canvas-wrap canvas { width: 180px; height: 180px; border-radius: 50%; }
+    .horizon-metrics { display: flex; justify-content: space-between; width: 100%; margin-top: 8px; gap: 8px; }
+    .h-metric-item { background: rgba(0,0,0,0.35); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 10px; flex: 1; }
+    .h-metric-label { font-size: 10px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 2px; }
+    .h-metric-val { font-size: 18px; font-weight: 800; color: var(--cyan); font-family: ui-monospace, SFMono-Regular, monospace; }
+    .h-accel-row { font-size: 11px; color: var(--text-dim); margin-top: 8px; font-family: ui-monospace, SFMono-Regular, monospace; background: rgba(0,0,0,0.25); padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); width: 100%; }
+    .h-accel-row b { color: #f1f5f9; font-weight: 700; }
 
     /* Commander Controls Grid */
     .commander-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 18px; }
@@ -144,7 +158,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
       <div class="title">
         <h1>ARK-BOT</h1>
-        <p>Cyber Motion Commander (v1.0.5)</p>
+        <p>Cyber Motion Commander (v1.0.6)</p>
       </div>
     </div>
 
@@ -177,26 +191,58 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     </div>
   </header>
 
-  <!-- Visual Animated Robot Simulation Card -->
-  <div class="sim-card">
-    <div class="sim-topbar">
-      <div class="sim-title">
-        <span>⚡ Live Kinematics Kinematics</span>
+  <!-- Visual Animated Robot Simulation & IMU Attitude Grid -->
+  <div class="tele-sim-grid">
+    <!-- Left: 3D Kinematics Visualizer -->
+    <div class="sim-card">
+      <div class="sim-topbar">
+        <div class="sim-title">
+          <span>⚡ Live Kinematics</span>
+        </div>
+        <div class="view-toggles">
+          <button class="view-btn active" id="btnViewIso" onclick="setViewMode('iso')">3D Isometric</button>
+          <button class="view-btn" id="btnViewTop" onclick="setViewMode('top')">Top-Down</button>
+          <button class="view-btn" id="btnViewSide" onclick="setViewMode('side')">Side Elevation</button>
+        </div>
       </div>
-      <div class="view-toggles">
-        <button class="view-btn active" id="btnViewIso" onclick="setViewMode('iso')">3D Isometric</button>
-        <button class="view-btn" id="btnViewTop" onclick="setViewMode('top')">Top-Down</button>
-        <button class="view-btn" id="btnViewSide" onclick="setViewMode('side')">Side Elevation</button>
+      
+      <div class="canvas-container">
+        <canvas id="robotCanvas"></canvas>
       </div>
-    </div>
-    
-    <div class="canvas-container">
-      <canvas id="robotCanvas"></canvas>
+
+      <div class="sim-footer">
+        <div class="sim-status" id="simPoseText">Pose: STANDING NEUTRAL (Z = -100mm)</div>
+        <div id="activeActionText" style="color:var(--text-dim); font-weight:600;">Action: IDLE</div>
+      </div>
     </div>
 
-    <div class="sim-footer">
-      <div class="sim-status" id="simPoseText">Pose: STANDING NEUTRAL (Z = -100mm)</div>
-      <div id="activeActionText" style="color:var(--text-dim); font-weight:600;">Action: IDLE</div>
+    <!-- Right: Artificial Horizon (MPU6050 6-Axis IMU) -->
+    <div class="sim-card horizon-panel">
+      <div class="sim-topbar" style="width:100%;">
+        <div class="sim-title">
+          <span>🧭 Artificial Horizon</span>
+        </div>
+        <button class="rf-btn" onclick="calibrateImu()" title="Tare Level Zero Offsets (Save to NVS)">🎯 Zero IMU</button>
+      </div>
+
+      <div class="horizon-canvas-wrap">
+        <canvas id="horizonCanvas" width="180" height="180"></canvas>
+      </div>
+
+      <div class="horizon-metrics">
+        <div class="h-metric-item">
+          <span class="h-metric-label">PITCH</span>
+          <span class="h-metric-val" id="imuPitchVal">0.0°</span>
+        </div>
+        <div class="h-metric-item">
+          <span class="h-metric-label">ROLL</span>
+          <span class="h-metric-val" id="imuRollVal">0.0°</span>
+        </div>
+      </div>
+
+      <div class="h-accel-row">
+        <span>G-FORCE: <b id="imuAx">0.00</b>g, <b id="imuAy">0.00</b>g, <b id="imuAz">1.00</b>g</span>
+      </div>
     </div>
   </div>
 
@@ -318,7 +364,8 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.6</span>
+      </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
       </div>
@@ -336,6 +383,12 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     let isExecuting = false;
     let pollInterval = 300;
     let pollTimer = null;
+
+    // IMU State
+    let imuReady = false;
+    let targetPitch = 0.0, currentSimPitch = 0.0;
+    let targetRoll = 0.0, currentSimRoll = 0.0;
+    let imuAx = 0.0, imuAy = 0.0, imuAz = 1.0;
 
     // Real-time Cartesian Sites [x, y, z] for 4 legs: 0:FR, 1:RR, 2:FL, 3:RL
     let targetSites = [
@@ -463,6 +516,23 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
+    async function calibrateImu() {
+      showToast("🎯 Zeroing IMU... Keep robot stationary!");
+      try {
+        const res = await fetch('/api/imu/calibrate', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`✅ IMU Calibrated! P Off: ${data.pitch_offset.toFixed(1)}° | R Off: ${data.roll_offset.toFixed(1)}°`);
+          fetchStatus();
+        } else {
+          showToast("⚠️ IMU calibration failed");
+        }
+      } catch (err) {
+        console.error("IMU calibrate error", err);
+        showToast("⚠️ IMU calibration error");
+      }
+    }
+
     async function fetchStatus() {
       try {
         const res = await fetch('/api/status');
@@ -482,6 +552,28 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
             else if (data.vbat < 7.4) vbatPill.style.color = '#f59e0b';
             else vbatPill.style.color = '#00f0ff';
           }
+        }
+
+        // IMU Telemetry
+        if (data.imu) {
+          imuReady = !!data.imu.ready;
+          targetPitch = data.imu.pitch || 0.0;
+          targetRoll  = data.imu.roll || 0.0;
+          imuAx = (data.imu.ax !== undefined) ? data.imu.ax : 0.0;
+          imuAy = (data.imu.ay !== undefined) ? data.imu.ay : 0.0;
+          imuAz = (data.imu.az !== undefined) ? data.imu.az : 1.0;
+
+          const pVal = document.getElementById('imuPitchVal');
+          const rVal = document.getElementById('imuRollVal');
+          const axEl = document.getElementById('imuAx');
+          const ayEl = document.getElementById('imuAy');
+          const azEl = document.getElementById('imuAz');
+
+          if (pVal) pVal.innerText = `${targetPitch >= 0 ? '+' : ''}${targetPitch.toFixed(1)}°`;
+          if (rVal) rVal.innerText = `${targetRoll >= 0 ? '+' : ''}${targetRoll.toFixed(1)}°`;
+          if (axEl) axEl.innerText = `${imuAx.toFixed(2)}`;
+          if (ayEl) ayEl.innerText = `${imuAy.toFixed(2)}`;
+          if (azEl) azEl.innerText = `${imuAz.toFixed(2)}`;
         }
 
         const botStatus = document.getElementById('botStatus');
@@ -553,7 +645,147 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       setTimeout(() => toast.classList.remove('show'), 2000);
     }
 
-    // 3D Visualizer Canvas
+    // ==========================================
+    // Artificial Horizon Vector Renderer
+    // ==========================================
+    function drawArtificialHorizon(canvasId, pitch, roll, ready) {
+      const c = document.getElementById(canvasId);
+      if (!c) return;
+      const hCtx = c.getContext('2d');
+      const w = c.width, h = c.height;
+      const r = Math.min(w, h) / 2 - 4;
+      const cx = w / 2, cy = h / 2;
+
+      hCtx.clearRect(0, 0, w, h);
+
+      // Background Bezel
+      hCtx.save();
+      hCtx.beginPath();
+      hCtx.arc(cx, cy, r, 0, Math.PI * 2);
+      hCtx.clip();
+
+      if (!ready) {
+        hCtx.fillStyle = '#0f172a';
+        hCtx.fill();
+        hCtx.fillStyle = '#64748b';
+        hCtx.font = 'bold 12px sans-serif';
+        hCtx.textAlign = 'center';
+        hCtx.textBaseline = 'middle';
+        hCtx.fillText('MPU6050 OFFLINE', cx, cy);
+        hCtx.restore();
+        return;
+      }
+
+      // Attitude Transformation: Rotate by Roll, Translate by Pitch
+      hCtx.save();
+      hCtx.translate(cx, cy);
+      hCtx.rotate((-roll * Math.PI) / 180.0);
+
+      const pxPerDeg = r / 35.0; // 35 degrees to outer edge
+      const pitchPx = pitch * pxPerDeg;
+
+      // Sky (Top Half - Cyber Blue)
+      hCtx.fillStyle = '#0284c7';
+      hCtx.fillRect(-r * 2, -r * 2 + pitchPx, r * 4, r * 2);
+
+      // Ground (Bottom Half - Earth Slate / Warm Umber)
+      hCtx.fillStyle = '#78350f';
+      hCtx.fillRect(-r * 2, pitchPx, r * 4, r * 2);
+
+      // Horizon Center Line
+      hCtx.strokeStyle = '#ffffff';
+      hCtx.lineWidth = 2.5;
+      hCtx.beginPath();
+      hCtx.moveTo(-r * 2, pitchPx);
+      hCtx.lineTo(r * 2, pitchPx);
+      hCtx.stroke();
+
+      // Pitch Ladder Lines
+      hCtx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      hCtx.fillStyle = '#ffffff';
+      hCtx.font = 'bold 9px monospace';
+      hCtx.textAlign = 'center';
+      hCtx.textBaseline = 'middle';
+
+      for (let deg = -40; deg <= 40; deg += 10) {
+        if (deg === 0) continue;
+        const lineY = pitchPx - (deg * pxPerDeg);
+        const lineW = (Math.abs(deg) % 20 === 0) ? 26 : 14;
+
+        hCtx.lineWidth = (Math.abs(deg) % 20 === 0) ? 2 : 1.2;
+        hCtx.beginPath();
+        hCtx.moveTo(-lineW, lineY);
+        hCtx.lineTo(lineW, lineY);
+        hCtx.stroke();
+
+        if (Math.abs(deg) % 10 === 0) {
+          hCtx.fillText(Math.abs(deg).toString(), lineW + 8, lineY);
+          hCtx.fillText(Math.abs(deg).toString(), -lineW - 8, lineY);
+        }
+      }
+
+      hCtx.restore(); // Restore from roll/pitch transform
+
+      // Outer Bezel & Bank Markers
+      hCtx.restore(); // Restore clipping
+      hCtx.save();
+      hCtx.beginPath();
+      hCtx.arc(cx, cy, r, 0, Math.PI * 2);
+      hCtx.lineWidth = 3.5;
+      hCtx.strokeStyle = '#00f0ff';
+      hCtx.shadowColor = 'rgba(0, 240, 255, 0.5)';
+      hCtx.shadowBlur = 8;
+      hCtx.stroke();
+      hCtx.shadowBlur = 0;
+
+      // Bank Markers (0, +/-30, +/-60 deg around top arc)
+      hCtx.strokeStyle = '#00f0ff';
+      hCtx.lineWidth = 2;
+      [0, -30, 30, -60, 60].forEach(angle => {
+        const rad = ((angle - 90) * Math.PI) / 180.0;
+        const x1 = cx + (r - 2) * Math.cos(rad);
+        const y1 = cy + (r - 2) * Math.sin(rad);
+        const x2 = cx + (r - 8) * Math.cos(rad);
+        const y2 = cy + (r - 8) * Math.sin(rad);
+        hCtx.beginPath(); hCtx.moveTo(x1, y1); hCtx.lineTo(x2, y2); hCtx.stroke();
+      });
+
+      // Fixed Aircraft Reticle (Center Reference Symbol)
+      hCtx.strokeStyle = '#facc15';
+      hCtx.fillStyle = '#facc15';
+      hCtx.lineWidth = 3;
+      hCtx.shadowColor = 'rgba(250, 204, 21, 0.6)';
+      hCtx.shadowBlur = 6;
+
+      // Left & Right Wings
+      hCtx.beginPath();
+      hCtx.moveTo(cx - 38, cy);
+      hCtx.lineTo(cx - 14, cy);
+      hCtx.lineTo(cx - 14, cy + 6);
+      hCtx.moveTo(cx + 38, cy);
+      hCtx.lineTo(cx + 14, cy);
+      hCtx.lineTo(cx + 14, cy + 6);
+      hCtx.stroke();
+
+      // Center Reference Dot
+      hCtx.beginPath();
+      hCtx.arc(cx, cy, 3, 0, Math.PI * 2);
+      hCtx.fill();
+
+      // Top Zero Roll Indicator Pointer
+      hCtx.beginPath();
+      hCtx.moveTo(cx, cy - r + 3);
+      hCtx.lineTo(cx - 5, cy - r + 11);
+      hCtx.lineTo(cx + 5, cy - r + 11);
+      hCtx.closePath();
+      hCtx.fill();
+
+      hCtx.restore();
+    }
+
+    // ==========================================
+    // 3D Kinematics Visualizer Canvas
+    // ==========================================
     const canvas = document.getElementById('robotCanvas');
     const ctx = canvas.getContext('2d');
 
@@ -588,13 +820,18 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       const h = canvas.parentElement.clientHeight;
       ctx.clearRect(0, 0, w, h);
 
-      // Smooth interpolation toward target sites & angles
+      // Smooth interpolation toward target sites, angles, and attitude
       for (let l = 0; l < 4; l++) {
         for (let k = 0; k < 3; k++) {
           currentSimSites[l][k] += (targetSites[l][k] - currentSimSites[l][k]) * 0.32;
           currentSimAngles[l][k] += (targetAngles[l][k] - currentSimAngles[l][k]) * 0.32;
         }
       }
+      currentSimPitch += (targetPitch - currentSimPitch) * 0.25;
+      currentSimRoll  += (targetRoll  - currentSimRoll)  * 0.25;
+
+      // Draw Artificial Horizon
+      drawArtificialHorizon('horizonCanvas', currentSimPitch, currentSimRoll, imuReady);
 
       const cx = w / 2;
       const cy = h / 2 + (viewMode === 'side' ? 20 : 0);
@@ -602,6 +839,18 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       // Dynamic Body Elevation from average stance height
       const avgZ = (currentSimSites[0][2] + currentSimSites[1][2] + currentSimSites[2][2] + currentSimSites[3][2]) / 4;
       const bodyElevZ = -avgZ * S * 0.75; // Elevate body above floor
+
+      // 3D Attitude Rotation (Roll & Pitch)
+      const phi = (currentSimRoll * Math.PI) / 180.0;
+      const theta = (currentSimPitch * Math.PI) / 180.0;
+
+      function rotateBody(x, y, z) {
+        // Roll around X-axis / Pitch around Y-axis
+        const rx = x * Math.cos(phi) - (z - bodyElevZ) * Math.sin(phi);
+        const ry = y * Math.cos(theta) - (z - bodyElevZ) * Math.sin(theta);
+        const rz = bodyElevZ + (z - bodyElevZ) + x * Math.sin(phi) + y * Math.sin(theta);
+        return { x: rx, y: ry, z: rz };
+      }
 
       // 3D Point Projection Helper
       function projectPoint(x, y, z) {
@@ -634,10 +883,14 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         const [x_mm, y_mm, z_mm] = currentSimSites[l];
         const m = legMounts[l];
 
-        // 1. Hip Mount Origin on Body Chassis
-        const hipX = m.sideX * bodyHalfW;
-        const hipY = m.frontY * bodyHalfL;
-        const hipZ = bodyElevZ;
+        // 1. Hip Mount Origin on Body Chassis (Rotated with IMU Attitude)
+        const unrotHipX = m.sideX * bodyHalfW;
+        const unrotHipY = m.frontY * bodyHalfL;
+        const rotHip = rotateBody(unrotHipX, unrotHipY, bodyElevZ);
+
+        const hipX = rotHip.x;
+        const hipY = rotHip.y;
+        const hipZ = rotHip.z;
 
         // 2. Exact Inverse-to-Forward Trigonometry (Kinematics Vector Math)
         const w_mm = Math.sqrt(x_mm * x_mm + y_mm * y_mm);
@@ -653,17 +906,14 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         const alpha = ang0 + Math.acos(cosA);
 
         // 3. 3D Joint Locations
-        // Coxa Joint (end of coxa horn):
         const coxaX = hipX + m.sideX * (Lc * Math.cos(gamma));
         const coxaY = hipY - (Lc * Math.sin(gamma));
         const coxaZ = hipZ;
 
-        // Knee Joint (end of femur link):
         const kneeX = coxaX + m.sideX * (La * Math.cos(alpha) * Math.cos(gamma));
         const kneeY = coxaY - (La * Math.cos(alpha) * Math.sin(gamma));
         const kneeZ = coxaZ + (La * Math.sin(alpha));
 
-        // Foot Ground Contact Pad:
         const footX = hipX + m.sideX * (x_mm * S);
         const footY = hipY - ((y_mm - 40) * S);
         const footZ = hipZ + (z_mm * S);
@@ -680,11 +930,6 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
 
       // Ground Shadows under feet
       legPoints.forEach(leg => {
-        const shadowP = projectPoint(
-          leg.mount.sideX * bodyHalfW + leg.mount.sideX * (currentSimSites[leg.mount.name === "FR" ? 0 : 1][0] * S),
-          leg.mount.frontY * bodyHalfL - ((currentSimSites[0][1] - 40) * S),
-          -10
-        );
         ctx.beginPath();
         ctx.ellipse(leg.p3.x, leg.p3.y + 12, 10, 5, 0, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
@@ -737,11 +982,16 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         ctx.shadowBlur = 0;
       });
 
-      // Chassis Body Shell
-      const c_fr = projectPoint(bodyHalfW, -bodyHalfL, bodyElevZ + 8);
-      const c_rr = projectPoint(bodyHalfW, bodyHalfL, bodyElevZ + 8);
-      const c_rl = projectPoint(-bodyHalfW, bodyHalfL, bodyElevZ + 8);
-      const c_fl = projectPoint(-bodyHalfW, -bodyHalfL, bodyElevZ + 8);
+      // Chassis Body Shell (Rotated with IMU Attitude)
+      const rot_fr = rotateBody(bodyHalfW, -bodyHalfL, bodyElevZ + 8);
+      const rot_rr = rotateBody(bodyHalfW, bodyHalfL, bodyElevZ + 8);
+      const rot_rl = rotateBody(-bodyHalfW, bodyHalfL, bodyElevZ + 8);
+      const rot_fl = rotateBody(-bodyHalfW, -bodyHalfL, bodyElevZ + 8);
+
+      const c_fr = projectPoint(rot_fr.x, rot_fr.y, rot_fr.z);
+      const c_rr = projectPoint(rot_rr.x, rot_rr.y, rot_rr.z);
+      const c_rl = projectPoint(rot_rl.x, rot_rl.y, rot_rl.z);
+      const c_fl = projectPoint(rot_fl.x, rot_fl.y, rot_fl.z);
 
       ctx.save();
       ctx.beginPath();
@@ -765,7 +1015,8 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       ctx.shadowBlur = 0;
 
       // Chassis Center Core Logo
-      const coreP = projectPoint(0, 0, bodyElevZ + 8);
+      const rot_core = rotateBody(0, 0, bodyElevZ + 8);
+      const coreP = projectPoint(rot_core.x, rot_core.y, rot_core.z);
       if (botLogoImg.complete && botLogoImg.naturalWidth > 0) {
         const sz = 32;
         ctx.drawImage(botLogoImg, coreP.x - sz/2, coreP.y - sz/2, sz, sz);
@@ -960,6 +1211,31 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     <button class="btn btn-dark" onclick="sendBeep()">🔔 Beep Buzzer</button>
   </div>
 
+  <!-- MPU6050 6-Axis IMU & Attitude Calibration Card -->
+  <div class="section-title">MPU6050 6-Axis IMU & Attitude Tare</div>
+  <div class="card" style="margin-bottom:18px; padding:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+      <div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+        <canvas id="calibHorizonCanvas" width="130" height="130" style="width:130px; height:130px; border-radius:50%; box-shadow:0 0 16px rgba(0,240,255,0.25);"></canvas>
+        <div>
+          <div style="font-size:15px; font-weight:800; color:var(--cyan); margin-bottom:4px;">Attitude Director Indicator (IMU)</div>
+          <div style="font-size:11px; color:var(--text-dim); margin-bottom:8px;">50Hz Complementary Filter Fusion (0x68 / 0x69)</div>
+          <div style="display:flex; gap:16px; font-family:ui-monospace,SFMono-Regular,monospace; font-size:14px; font-weight:800;">
+            <span style="color:#ffffff;">PITCH: <span id="calibPitch" style="color:var(--cyan);">0.0°</span></span>
+            <span style="color:#ffffff;">ROLL: <span id="calibRoll" style="color:var(--cyan);">0.0°</span></span>
+          </div>
+          <div style="font-size:11px; color:var(--text-dim); margin-top:4px; font-family:ui-monospace,SFMono-Regular,monospace;" id="calibGForce">
+            ACCEL: 0.00g, 0.00g, 1.00g
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+        <button class="btn btn-cyan" onclick="calibrateImu()">🎯 Tare Level Zero (Save to NVS)</button>
+        <div id="calibOffsets" style="font-size:11px; color:var(--text-dim);">Offsets: P 0.0° | R 0.0°</div>
+      </div>
+    </div>
+  </div>
+
   <!-- 4 Leg Control Cards -->
   <div class="section-title">Individual Leg & Joint Controls</div>
   <div class="legs-grid">
@@ -974,7 +1250,7 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.6</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
@@ -997,6 +1273,8 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     ];
     
     let servoPower = Array(4).fill().map(() => Array(3).fill(true));
+    let imuReady = false;
+    let currentPitch = 0.0, currentRoll = 0.0;
 
     function buildCards() {
       for (let l = 0; l < 4; l++) {
@@ -1135,6 +1413,114 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
       } catch (err) {}
     }
 
+    async function calibrateImu() {
+      showToast("🎯 Zeroing IMU... Keep robot stationary!");
+      try {
+        const res = await fetch('/api/imu/calibrate', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`✅ IMU Calibrated! P Off: ${data.pitch_offset.toFixed(1)}° | R Off: ${data.roll_offset.toFixed(1)}°`);
+          fetchStatus();
+        } else {
+          showToast("⚠️ IMU calibration failed");
+        }
+      } catch (err) {
+        showToast("⚠️ IMU calibration error");
+      }
+    }
+
+    function drawArtificialHorizon(canvasId, pitch, roll, ready) {
+      const c = document.getElementById(canvasId);
+      if (!c) return;
+      const hCtx = c.getContext('2d');
+      const w = c.width, h = c.height;
+      const r = Math.min(w, h) / 2 - 4;
+      const cx = w / 2, cy = h / 2;
+
+      hCtx.clearRect(0, 0, w, h);
+      hCtx.save();
+      hCtx.beginPath();
+      hCtx.arc(cx, cy, r, 0, Math.PI * 2);
+      hCtx.clip();
+
+      if (!ready) {
+        hCtx.fillStyle = '#0f172a';
+        hCtx.fill();
+        hCtx.fillStyle = '#64748b';
+        hCtx.font = 'bold 11px sans-serif';
+        hCtx.textAlign = 'center';
+        hCtx.textBaseline = 'middle';
+        hCtx.fillText('MPU6050 OFFLINE', cx, cy);
+        hCtx.restore();
+        return;
+      }
+
+      hCtx.save();
+      hCtx.translate(cx, cy);
+      hCtx.rotate((-roll * Math.PI) / 180.0);
+
+      const pxPerDeg = r / 35.0;
+      const pitchPx = pitch * pxPerDeg;
+
+      hCtx.fillStyle = '#0284c7';
+      hCtx.fillRect(-r * 2, -r * 2 + pitchPx, r * 4, r * 2);
+
+      hCtx.fillStyle = '#78350f';
+      hCtx.fillRect(-r * 2, pitchPx, r * 4, r * 2);
+
+      hCtx.strokeStyle = '#ffffff';
+      hCtx.lineWidth = 2;
+      hCtx.beginPath();
+      hCtx.moveTo(-r * 2, pitchPx);
+      hCtx.lineTo(r * 2, pitchPx);
+      hCtx.stroke();
+
+      hCtx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      hCtx.fillStyle = '#ffffff';
+      hCtx.font = 'bold 8px monospace';
+      hCtx.textAlign = 'center';
+      hCtx.textBaseline = 'middle';
+
+      for (let deg = -40; deg <= 40; deg += 10) {
+        if (deg === 0) continue;
+        const lineY = pitchPx - (deg * pxPerDeg);
+        const lineW = (Math.abs(deg) % 20 === 0) ? 20 : 12;
+        hCtx.lineWidth = (Math.abs(deg) % 20 === 0) ? 1.8 : 1.0;
+        hCtx.beginPath();
+        hCtx.moveTo(-lineW, lineY);
+        hCtx.lineTo(lineW, lineY);
+        hCtx.stroke();
+        if (Math.abs(deg) % 10 === 0) {
+          hCtx.fillText(Math.abs(deg).toString(), lineW + 6, lineY);
+          hCtx.fillText(Math.abs(deg).toString(), -lineW - 6, lineY);
+        }
+      }
+      hCtx.restore();
+
+      hCtx.restore();
+      hCtx.save();
+      hCtx.beginPath();
+      hCtx.arc(cx, cy, r, 0, Math.PI * 2);
+      hCtx.lineWidth = 3;
+      hCtx.strokeStyle = '#00f0ff';
+      hCtx.shadowColor = 'rgba(0, 240, 255, 0.5)';
+      hCtx.shadowBlur = 6;
+      hCtx.stroke();
+      hCtx.shadowBlur = 0;
+
+      // Aircraft symbol
+      hCtx.strokeStyle = '#facc15';
+      hCtx.fillStyle = '#facc15';
+      hCtx.lineWidth = 2.5;
+      hCtx.beginPath();
+      hCtx.moveTo(cx - 30, cy); hCtx.lineTo(cx - 10, cy); hCtx.lineTo(cx - 10, cy + 5);
+      hCtx.moveTo(cx + 30, cy); hCtx.lineTo(cx + 10, cy); hCtx.lineTo(cx + 10, cy + 5);
+      hCtx.stroke();
+      hCtx.beginPath(); hCtx.arc(cx, cy, 2.5, 0, Math.PI * 2); hCtx.fill();
+      hCtx.beginPath(); hCtx.moveTo(cx, cy - r + 2); hCtx.lineTo(cx - 4, cy - r + 9); hCtx.lineTo(cx + 4, cy - r + 9); hCtx.closePath(); hCtx.fill();
+      hCtx.restore();
+    }
+
     async function fetchStatus() {
       try {
         const res = await fetch('/api/status');
@@ -1155,6 +1541,23 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
             else if (data.vbat < 7.4) vbatPill.style.color = '#f59e0b';
             else vbatPill.style.color = '#00f0ff';
           }
+        }
+
+        // IMU Data
+        if (data.imu) {
+          imuReady = !!data.imu.ready;
+          currentPitch = data.imu.pitch || 0.0;
+          currentRoll  = data.imu.roll || 0.0;
+
+          const cp = document.getElementById('calibPitch');
+          const cr = document.getElementById('calibRoll');
+          const cg = document.getElementById('calibGForce');
+          if (cp) cp.innerText = `${currentPitch >= 0 ? '+' : ''}${currentPitch.toFixed(1)}°`;
+          if (cr) cr.innerText = `${currentRoll >= 0 ? '+' : ''}${currentRoll.toFixed(1)}°`;
+          if (cg && data.imu.ax !== undefined) {
+            cg.innerText = `ACCEL: ${data.imu.ax.toFixed(2)}g, ${data.imu.ay.toFixed(2)}g, ${data.imu.az.toFixed(2)}g`;
+          }
+          drawArtificialHorizon('calibHorizonCanvas', currentPitch, currentRoll, imuReady);
         }
 
         if (data.angles) {
@@ -1204,7 +1607,7 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
 
     buildCards();
     fetchStatus();
-    setInterval(fetchStatus, 2000);
+    setInterval(fetchStatus, 300);
   </script>
 </body>
 </html>
@@ -1555,7 +1958,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.6</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
@@ -1970,7 +2373,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
       <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
       <div class="title">
         <h1>ARK-BOT</h1>
-        <p>Firmware OTA Manager (v1.0.5)</p>
+        <p>Firmware OTA Manager (v1.0.6)</p>
       </div>
     </div>
 
@@ -2070,7 +2473,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
         </tr>
         <tr>
           <td>Current Version</td>
-          <td style="color:var(--cyan);">v1.0.5</td>
+          <td style="color:var(--cyan);">v1.0.6</td>
         </tr>
         <tr>
           <td>Hardware MCU</td>
@@ -2118,7 +2521,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.6</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>

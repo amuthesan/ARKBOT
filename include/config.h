@@ -6,7 +6,8 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v1.0.5"
+#define ROBOT_VERSION     "v1.0.6"
+
 
 
 // ==========================================
@@ -98,8 +99,12 @@ const float STAND_SEAT_SPEED  = 2.0f;
 
 
 // I2C Addresses
-#define OLED_I2C_ADDRESS    0x3C  // 0.96" SSD1306 OLED (128x64)
-#define PCA9685_I2C_ADDRESS 0x40  // PCA9685 16-Channel PWM Servo Driver
+#define OLED_I2C_ADDRESS        0x3C  // 0.96" SSD1306 OLED (128x64)
+#define PCA9685_I2C_ADDRESS     0x40  // PCA9685 16-Channel PWM Servo Driver
+#define MPU6050_I2C_ADDRESS     0x68  // MPU6050 6-Axis IMU (Primary)
+#define MPU6050_I2C_ALT_ADDRESS 0x69  // MPU6050 6-Axis IMU (Alternate AD0=High)
+#define IMU_FILTER_ALPHA        0.98f // Complementary filter weight (98% Gyro + 2% Accel)
+
 
 // OLED Display Configuration
 #define SCREEN_WIDTH  128

@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
 
         # Right: Tabbed Panels
         self.tabs = QTabWidget()
-        self.commander_panel = CommanderPanel()
+        self.commander_panel = CommanderPanel(self.worker)
         self.commander_panel.action_requested.connect(self.worker.send_action)
         self.commander_panel.height_requested.connect(self.worker.send_walk_height)
 
@@ -478,11 +478,10 @@ class MainWindow(QMainWindow):
             except (ValueError, TypeError):
                 pass
 
-        # 3. Sync walk height if provided
-        if "walk_height" in telem:
-            self.commander_panel.update_walk_height(telem["walk_height"])
+        # 3. Sync walk height and Commander panel (including Artificial Horizon)
+        self.commander_panel.update_telemetry(telem)
 
-        # 3. Update panel data
+        # 4. Update panel data
         current_tab_idx = self.tabs.currentIndex()
         if current_tab_idx == 1:  # Calibrator tab active
             self.calibrator_panel.update_telemetry(telem)

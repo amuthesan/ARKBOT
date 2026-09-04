@@ -127,6 +127,9 @@ class TelemetryWorker(QThread):
     def send_init(self, target="all"):
         self.send_command({"init": target})
 
+    def send_imu_calibrate(self):
+        self.send_command({"imu_calib": True})
+
     def _normalize_telemetry(self, data):
         """Ensures all standard keys are present for both Serial and WebUI formats."""
         if not isinstance(data, dict):
@@ -321,6 +324,9 @@ class TelemetryWorker(QThread):
                         elif "init" in cmd:
                             url = f"{base_url}/api/init"
                             post_data = urllib.parse.urlencode({"target": "all"}).encode('utf-8')
+                        elif "imu_calib" in cmd:
+                            url = f"{base_url}/api/imu/calibrate"
+                            post_data = b""
                         else:
                             url = f"{base_url}/api/status"
                             post_data = None

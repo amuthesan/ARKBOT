@@ -78,6 +78,24 @@ class Viewport3D(QWidget):
         self.robot_mode = "STAND"
         self.telemetry_active = False
 
+        # IMU 6-Axis Attitude
+        self.imu_ready = False
+        self.imu_pitch = 0.0
+        self.imu_roll = 0.0
+        self.display_pitch = 0.0
+        self.display_roll = 0.0
+
+    def _rotate_body_point(self, x, y, z):
+        """Rotates a 3D point using current IMU pitch and roll."""
+        if not self.imu_ready:
+            return x, y, z
+        phi = math.radians(self.display_roll)
+        theta = math.radians(self.display_pitch)
+        rx = x * math.cos(phi) - z * math.sin(phi)
+        ry = y * math.cos(theta) - z * math.sin(theta)
+        rz = z + x * math.sin(phi) + y * math.sin(theta)
+        return rx, ry, rz
+
     def update_telemetry(self, telem):
         """Update robot state from telemetry packet and trigger repaint."""
         if not telem:
@@ -106,6 +124,11 @@ class Viewport3D(QWidget):
         if "pca" in telem:
             self.pca_ready = bool(telem["pca"])
 
+        if "imu" in telem and isinstance(telem["imu"], dict):
+            self.imu_ready = bool(telem["imu"].get("ready", False))
+            self.imu_pitch = float(telem["imu"].get("pitch", 0.0))
+            self.imu_roll  = float(telem["imu"].get("roll", 0.0))
+
         self.update()
 
     def advance_animation(self):
@@ -120,6 +143,22 @@ class Viewport3D(QWidget):
                     changed = True
                 else:
                     self.display_sites[i][j] = self.sites[i][j]
+
+        # Smooth IMU Pitch & Roll LERP
+        diff_p = self.imu_pitch - self.display_pitch
+        if abs(diff_p) > 0.05:
+            self.display_pitch += diff_p * 0.3
+            changed = True
+        else:
+            self.display_pitch = self.imu_pitch
+
+        diff_r = self.imu_roll - self.display_roll
+        if abs(diff_r) > 0.05:
+            self.display_roll += diff_r * 0.3
+            changed = True
+        else:
+            self.display_roll = self.imu_roll
+
         if changed:
             self.update()
 
@@ -236,11 +275,11 @@ class Viewport3D(QWidget):
             ux = y / hyp
             uy = -x / hyp
 
-        # 1. Base Mount
-        p0 = (mx, my, mz)
+        # 1. Base Mount (Rotated with IMU Attitude)
+        p0 = self._rotate_body_point(mx, my, mz)
 
         # 2. Coxa Tip
-        p1 = (
+        p1 = self._rotate_body_point(
             mx + LENGTH_C * ux,
             my + LENGTH_C * uy,
             mz
@@ -249,10 +288,10 @@ class Viewport3D(QWidget):
         # 3. Knee Joint
         femur_h = LENGTH_A * math.cos(alpha)
         femur_v = LENGTH_A * math.sin(alpha)
-        p2 = (
-            p1[0] + femur_h * ux,
-            p1[1] + femur_h * uy,
-            p1[2] + femur_v
+        p2 = self._rotate_body_point(
+            mx + LENGTH_C * ux + femur_h * ux,
+            my + LENGTH_C * uy + femur_h * uy,
+            mz + femur_v
         )
 
         # 4. Foot Tip
@@ -322,31 +361,30 @@ class Viewport3D(QWidget):
         painter.end()
 
     def _draw_floor_grid(self, painter, cx, cy):
-        """Renders subtle glowing cyber floor grid at ground level Z = -115mm."""
-        grid_z = -115.0
-        grid_size = 360.0
-        step = 60.0
+        grid_z = -120.0
+        grid_extent = 280.0
+        grid_step = 40.0
 
-        grid_pen = QPen(QColor(0, 240, 255, 20), 1.0, Qt.SolidLine)
+        grid_pen = QPen(QColor(0, 240, 255, 30), 1.0)
         painter.setPen(grid_pen)
 
-        # X grid lines
-        x = -grid_size
-        while x <= grid_size:
-            p1 = self.project_3d(x, -grid_size, grid_z, cx, cy)
-            p2 = self.project_3d(x,  grid_size, grid_z, cx, cy)
-            painter.drawLine(QPointF(p1[0], p1[1]), QPointF(p2[0], p2[1]))
-            x += step
+        # X lines (Forward/Back)
+        y = -grid_extent
+        while y <= grid_extent:
+            p_start = self.project_3d(-grid_extent, y, grid_z, cx, cy)
+            p_end = self.project_3d(grid_extent, y, grid_z, cx, cy)
+            painter.drawLine(QPointF(p_start[0], p_start[1]), QPointF(p_end[0], p_end[1]))
+            y += grid_step
 
-        # Y grid lines
-        y = -grid_size
-        while y <= grid_size:
-            p1 = self.project_3d(-grid_size, y, grid_z, cx, cy)
-            p2 = self.project_3d( grid_size, y, grid_z, cx, cy)
-            painter.drawLine(QPointF(p1[0], p1[1]), QPointF(p2[0], p2[1]))
-            y += step
+        # Y lines (Left/Right)
+        x = -grid_extent
+        while x <= grid_extent:
+            p_start = self.project_3d(x, -grid_extent, grid_z, cx, cy)
+            p_end = self.project_3d(x, grid_extent, grid_z, cx, cy)
+            painter.drawLine(QPointF(p_start[0], p_start[1]), QPointF(p_end[0], p_end[1]))
+            x += grid_step
 
-        # Origin Axes
+        # Coordinate Frame Origin & Forward Vector
         p_origin = self.project_3d(0, 0, grid_z, cx, cy)
         p_x = self.project_3d(70, 0, grid_z, cx, cy)   # Forward (X)
         p_y = self.project_3d(0, 70, grid_z, cx, cy)   # Right (Y)
@@ -365,16 +403,16 @@ class Viewport3D(QWidget):
         hz = CHASSIS_H / 2.0
 
         top_corners = [
-            ( hx,  hy,  hz),
-            (-hx,  hy,  hz),
-            (-hx, -hy,  hz),
-            ( hx, -hy,  hz),
+            self._rotate_body_point( hx,  hy,  hz),
+            self._rotate_body_point(-hx,  hy,  hz),
+            self._rotate_body_point(-hx, -hy,  hz),
+            self._rotate_body_point( hx, -hy,  hz),
         ]
         bottom_corners = [
-            ( hx,  hy, -hz),
-            (-hx,  hy, -hz),
-            (-hx, -hy, -hz),
-            ( hx, -hy, -hz),
+            self._rotate_body_point( hx,  hy, -hz),
+            self._rotate_body_point(-hx,  hy, -hz),
+            self._rotate_body_point(-hx, -hy, -hz),
+            self._rotate_body_point( hx, -hy, -hz),
         ]
 
         p_top = [self.project_3d(x, y, z, cx, cy) for (x, y, z) in top_corners]

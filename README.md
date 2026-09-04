@@ -1,8 +1,8 @@
 # ARK-BOT Quadruped Robot Controller
 
-High-performance quadruped robot controller firmware built for the **Seeed Studio XIAO ESP32-C6** with **PCA9685 16-Channel I2C PWM Servo Driver**, **0.96" SSD1306 OLED Display**, **LEDC Buzzer**, **Switchable Internal/External Antenna**, and an embedded **Wi-Fi 6 Web UI**.
+High-performance quadruped robot controller firmware built for the **Seeed Studio XIAO ESP32-C6** with **PCA9685 16-Channel I2C PWM Servo Driver**, **MPU6050 6-Axis IMU (Attitude Director Indicator)**, **0.96" SSD1306 OLED Display**, **LEDC Buzzer**, **Switchable Internal/External Antenna**, and an embedded **Wi-Fi 6 Web UI**.
 
-> **System Architecture**: High-efficiency FreeRTOS-powered quadruped controller with dedicated **PCA9685 16-Channel 12-bit I2C PWM driver** (powered at 5V/6V), 32-bit RISC-V **XIAO ESP32-C6**, live vector kinematics visualizer, Over-The-Air (OTA) firmware updates, and dual connectivity (USB Serial & Wi-Fi 6).
+> **System Architecture**: High-efficiency FreeRTOS-powered quadruped controller with dedicated **PCA9685 16-Channel 12-bit I2C PWM driver** (powered at 5V/6V), **MPU6050 6-Axis IMU with 50Hz Complementary Sensor Fusion**, 32-bit RISC-V **XIAO ESP32-C6**, vector **Artificial Horizon** instruments (Web & Python Desktop), live 3D kinematics visualizer, Over-The-Air (OTA) firmware updates, and dual connectivity (USB Serial & Wi-Fi 6).
 
 ---
 
@@ -48,8 +48,8 @@ All 12 servos connect directly to the **PCA9685 16-Channel I2C PWM Driver** usin
 
 | Function | XIAO Pin | ESP32-C6 GPIO | Connected Device |
 | :--- | :---: | :---: | :--- |
-| **I2C SDA** | `D4` | `GPIO 22` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
-| **I2C SCL** | `D5` | `GPIO 23` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
+| **I2C SDA** | `D4` | `GPIO 22` | PCA9685 (`0x40`), OLED SSD1306 (`0x3C`), MPU6050 IMU (`0x68`) |
+| **I2C SCL** | `D5` | `GPIO 23` | PCA9685 (`0x40`), OLED SSD1306 (`0x3C`), MPU6050 IMU (`0x68`) |
 | **Buzzer** | `D3` | `GPIO 21` | Passive Buzzer (Expansion Board) |
 | **Battery Sense** | `A0` | `GPIO 0` | 10kΩ / 2.2kΩ Voltage Divider Input |
 | **RF Switch Power** | — | `GPIO 3` | Onboard RF Switch Power Enable (Active LOW) |
@@ -79,13 +79,15 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
     - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx`).
  
  ### 🎮 Action Commander (`/`)
+ - **🧭 Cyber Artificial Horizon Instrument**: Real-time avionics attitude indicator displaying live **Pitch** and **Roll** angles with pitch ladder markings and roll index markers.
  - **Directional Gait D-Pad**: Click on-screen buttons for **Forward**, **Backward**, **Turn Left**, **Turn Right**, **180° Reverse Turn**, and **Stop/Rest**.
  - **Dynamic Walking Height**: Select between **🔻 Low (-80mm)**, **🚶 Normal (-100mm)**, and **🔺 High (-125mm)** walking height presets.
  - **Postures & Social Gestures**: One-click **Stand Up**, **Stand High**, **Sit Down**, **Hand Shake**, and **Hand Wave**.
  - **Gait Customization**: Select step counts ($1, 2, 3, 5, 10$) and speed multipliers ($1.0\times, 1.5\times, 2.0\times$).
- - **Live 3D Kinematics Visualizer**: Real-time 3D simulation displaying robot movements and limb articulation.
+ - **Live 3D Kinematics Visualizer**: Real-time 3D simulation displaying robot movements and limb articulation, tilting dynamically with live IMU pitch and roll.
  
  ### 🎯 Visual Calibrator (`/calib`)
+ - **🧭 MPU6050 6-Axis IMU & Attitude Tare**: Circular attitude indicator with live pitch/roll metrics, accelerometer G-forces, and one-click **🎯 Tare Level Zero** button saving persistent offsets to NVS.
  - **Interactive Kinematics Simulator**: `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives with smooth mechanical LERP animation.
  - **Master Power & Neutral Alignment**: Master Start/Stop holding torque buttons, Center All ($90^\circ$), and Wave Calibration.
  - **Individual Joint Sliders**: Independent power toggles and sliders for all 12 leg joints across 4 legs.
@@ -110,11 +112,12 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
 A cross-platform desktop application built with **PySide6** and vector graphics for low-latency robot control, live 3D kinematics telemetry, and joint calibration.
 
 ### ✨ Features
+- **🧭 Vector Artificial Horizon**: Custom `QPainter` attitude director indicator with sky/ground division, pitch ladder, roll pointer, and live pitch/roll digital badges.
 - **Dual Connectivity**: Connect via **USB Serial** (`115200` baud auto-streaming) or **Wi-Fi** (HTTP polling at `http://arkbot.local`).
-- **Interactive 3D Kinematics Visualizer**: Real-time vector-rendered 3D viewport of the robot chassis and 4 articulated limbs with orbit, pan, and zoom camera controls.
+- **Interactive 3D Kinematics Visualizer**: Real-time vector-rendered 3D viewport of the robot chassis and 4 articulated limbs with orbit, pan, and zoom camera controls, dynamically tilting with real-time IMU attitude.
 - **Locomotion Commander**: D-Pad gait controller, posture switches (Stand/Sit/Stop), gestures (Hand Shake/Wave), and step/speed parameters.
 - **Servo Joint Calibrator**: 12 individual servo angle sliders ($0^\circ-180^\circ$) with live readouts, Center All ($90^\circ$ Neutral), and Master Power toggles.
-- **Diagnostics & Telemetry**: Real-time $(X, Y, Z)$ Cartesian limb matrix, raw servo angle readouts, PCA9685 health, packet rate counter, and serial communication log.
+- **Diagnostics & Telemetry**: Real-time $(X, Y, Z)$ Cartesian limb matrix, raw servo angle readouts, PCA9685 health, MPU6050 IMU status, packet rate counter, and serial communication log.
 
 ### 🚀 Running the Companion GUI
 ```bash

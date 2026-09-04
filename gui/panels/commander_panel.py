@@ -10,16 +10,22 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
+try:
+    from horizon_widget import ArtificialHorizonCard
+except ImportError:
+    from ..horizon_widget import ArtificialHorizonCard
+
 
 class CommanderPanel(QWidget):
     """
-    Control panel for high-level robot locomotion, stance, and gestures.
+    Control panel for high-level robot locomotion, stance, gestures, and attitude instrument.
     """
     action_requested = Signal(str, int, float)  # (action_name, steps, speed)
     height_requested = Signal(str)              # (height_profile: "low" | "normal" | "high")
 
-    def __init__(self, parent=None):
+    def __init__(self, telemetry_client=None, parent=None):
         super().__init__(parent)
+        self.telemetry_client = telemetry_client
         self.current_walk_height = "normal"
         self.init_ui()
 
@@ -27,6 +33,10 @@ class CommanderPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(14)
+
+        # 0. Artificial Horizon Attitude Instrument
+        self.horizon_card = ArtificialHorizonCard(self.telemetry_client, self)
+        main_layout.addWidget(self.horizon_card)
 
         # 1. Postures & Emergency Stop
         posture_group = QGroupBox("CORE POSTURES & ELEVATION")
@@ -227,3 +237,11 @@ class CommanderPanel(QWidget):
         steps = custom_steps if custom_steps is not None else self.step_spin.value()
         speed = self.speed_slider.value() / 10.0
         self.action_requested.emit(action_name, steps, speed)
+
+    def update_telemetry(self, data: dict):
+        if not data:
+            return
+        if hasattr(self, 'horizon_card') and self.horizon_card:
+            self.horizon_card.update_telemetry(data)
+        if "walk_height" in data:
+            self.update_walk_height(data["walk_height"])
