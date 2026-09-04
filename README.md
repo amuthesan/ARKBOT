@@ -2,34 +2,34 @@
 
 High-performance quadruped robot controller firmware built for the **Seeed Studio XIAO ESP32-C6** with **PCA9685 16-Channel I2C PWM Servo Driver**, **0.96" SSD1306 OLED Display**, **LEDC Buzzer**, **Switchable Internal/External Antenna**, and an embedded **Wi-Fi 6 Web UI**.
 
-> **Migration Note**: This codebase modernizes the original Arduino Nano (Regis Hsu) design. Instead of driving servos directly from GPIO pins D2–D13 with `Servo.h`, all 12 servos now connect to the dedicated **PCA9685 I2C driver** (powered at 5V/6V), controlled by the **XIAO ESP32-C6**.
+> **System Architecture**: High-efficiency FreeRTOS-powered quadruped controller with dedicated **PCA9685 16-Channel 12-bit I2C PWM driver** (powered at 5V/6V), 32-bit RISC-V **XIAO ESP32-C6**, live vector kinematics visualizer, Over-The-Air (OTA) firmware updates, and dual connectivity (USB Serial & Wi-Fi 6).
 
 ---
 
 ## PCA9685 16-Channel Servo Wiring Guide
 
-To make upgrading from the Arduino Nano seamless, each servo connects to the **PCA9685 port number matching its original Arduino Nano pin (D2 $\to$ Port 2, D3 $\to$ Port 3, etc.)**:
+All 12 servos connect directly to the **PCA9685 16-Channel I2C PWM Driver** using standard 3-pin servo headers (Signal, V+, GND):
 
 ### Port-by-Port Wiring Table
 
-| PCA9685 Port | Leg | Joint | Former Nano Pin |
-| :---: | :--- | :--- | :---: |
-| **0** | *(Unused)* | — | — |
-| **1** | *(Unused)* | — | — |
-| **2** | **Front-Right (FR)** | **Femur (Thigh)** | `D2` |
-| **3** | **Front-Right (FR)** | **Tibia (Calf)** | `D3` |
-| **4** | **Front-Right (FR)** | **Coxa (Hip)** | `D4` |
-| **5** | **Rear-Right (RR)** | **Femur (Thigh)** | `D5` |
-| **6** | **Rear-Right (RR)** | **Tibia (Calf)** | `D6` |
-| **7** | **Rear-Right (RR)** | **Coxa (Hip)** | `D7` |
-| **8** | **Front-Left (FL)** | **Femur (Thigh)** | `D8` |
-| **9** | **Front-Left (FL)** | **Tibia (Calf)** | `D9` |
-| **10** | **Front-Left (FL)** | **Coxa (Hip)** | `D10` |
-| **11** | **Rear-Left (RL)** | **Femur (Thigh)** | `D11` |
-| **12** | **Rear-Left (RL)** | **Tibia (Calf)** | `D12` |
-| **13** | **Rear-Left (RL)** | **Coxa (Hip)** | `D13` |
-| **14** | *(Unused)* | — | — |
-| **15** | *(Unused)* | — | — |
+| PCA9685 Channel | Leg | Joint |
+| :---: | :--- | :--- |
+| **0** | *(Unused)* | — |
+| **1** | *(Unused)* | — |
+| **2** | **Front-Right (FR)** | **Femur (Thigh)** |
+| **3** | **Front-Right (FR)** | **Tibia (Calf)** |
+| **4** | **Front-Right (FR)** | **Coxa (Hip)** |
+| **5** | **Rear-Right (RR)** | **Femur (Thigh)** |
+| **6** | **Rear-Right (RR)** | **Tibia (Calf)** |
+| **7** | **Rear-Right (RR)** | **Coxa (Hip)** |
+| **8** | **Front-Left (FL)** | **Femur (Thigh)** |
+| **9** | **Front-Left (FL)** | **Tibia (Calf)** |
+| **10** | **Front-Left (FL)** | **Coxa (Hip)** |
+| **11** | **Rear-Left (RL)** | **Femur (Thigh)** |
+| **12** | **Rear-Left (RL)** | **Tibia (Calf)** |
+| **13** | **Rear-Left (RL)** | **Coxa (Hip)** |
+| **14** | *(Unused)* | — |
+| **15** | *(Unused)* | — |
 
 ---
 
@@ -37,10 +37,10 @@ To make upgrading from the Arduino Nano seamless, each servo connects to the **P
 
 | Leg | Coxa (Hip) | Femur (Thigh) | Tibia (Calf) |
 | :--- | :---: | :---: | :---: |
-| **Front-Right (FR)** | **Port 4** *(D4)* | **Port 2** *(D2)* | **Port 3** *(D3)* |
-| **Rear-Right (RR)** | **Port 7** *(D7)* | **Port 5** *(D5)* | **Port 6** *(D6)* |
-| **Front-Left (FL)** | **Port 10** *(D10)* | **Port 8** *(D8)* | **Port 9** *(D9)* |
-| **Rear-Left (RL)** | **Port 13** *(D13)* | **Port 11** *(D11)* | **Port 12** *(D12)* |
+| **Front-Right (FR)** | **Channel 4** | **Channel 2** | **Channel 3** |
+| **Rear-Right (RR)** | **Channel 7** | **Channel 5** | **Channel 6** |
+| **Front-Left (FL)** | **Channel 10** | **Channel 8** | **Channel 9** |
+| **Rear-Left (RL)** | **Channel 13** | **Channel 11** | **Channel 12** |
 
 ---
 
@@ -74,11 +74,13 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
     - **🎮 Action Commander (Homepage)**: [`http://arkbot.local/`](http://arkbot.local/)
     - **🎯 Visual Kinematics Calibrator**: [`http://arkbot.local/calib`](http://arkbot.local/calib)
     - **⚙️ Wi-Fi & System Setup**: [`http://arkbot.local/setup`](http://arkbot.local/setup)
+    - **🚀 OTA Firmware Update**: [`http://arkbot.local/update`](http://arkbot.local/update)
     - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx`).
  
  ### 🎮 Action Commander (`/`)
- - **Directional Gait D-Pad**: Click on-screen buttons for **Forward**, **Backward**, **Turn Left**, **Turn Right**, and **Stop/Rest**.
- - **Postures & Social Gestures**: One-click **Stand Up** ($Z = -100\text{ mm}$), **Sit Down** ($Z = -56\text{ mm}$), **Hand Shake**, and **Hand Wave**.
+ - **Directional Gait D-Pad**: Click on-screen buttons for **Forward**, **Backward**, **Turn Left**, **Turn Right**, **180° Reverse Turn**, and **Stop/Rest**.
+ - **Dynamic Walking Height**: Select between **🔻 Low (-80mm)**, **🚶 Normal (-100mm)**, and **🔺 High (-125mm)** walking height presets.
+ - **Postures & Social Gestures**: One-click **Stand Up**, **Stand High**, **Sit Down**, **Hand Shake**, and **Hand Wave**.
  - **Gait Customization**: Select step counts ($1, 2, 3, 5, 10$) and speed multipliers ($1.0\times, 1.5\times, 2.0\times$).
  - **Live 3D Kinematics Visualizer**: Real-time 3D simulation displaying robot movements and limb articulation.
  
@@ -93,6 +95,11 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
  - **Credential Configuration**: Quick-select network from scan results, input Wi-Fi password with show/hide toggle, and save to persistent NVS storage across reboots.
  - **Telemetry Dashboard**: Live connection status, Station IP, SoftAP IP, MAC address, mDNS URL, and system uptime.
  - **Device Management**: Safely restart the ESP32-C6 controller or reset Wi-Fi configuration with automatic reconnection timer.
+
+ ### 🚀 OTA Firmware Update (`/update`)
+ - **Browser Firmware Flash**: Drag & drop or select `.bin` binary build files to flash the ESP32-C6 over Wi-Fi without USB cables.
+ - **Live Upload Progress**: Real-time progress bar with upload speed, byte count, and percentage indicator.
+ - **Automated Reboot**: Automatic reboot sequence and web interface reconnect after flashing completes.
 
 ---
 

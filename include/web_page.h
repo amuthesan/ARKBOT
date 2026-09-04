@@ -153,6 +153,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       <a href="/" class="nav-tab active">🎮 Commander</a>
       <a href="/calib" class="nav-tab">🎯 Calibrator</a>
       <a href="/setup" class="nav-tab">⚙️ Setup</a>
+      <a href="/update" class="nav-tab">🚀 Update</a>
     </nav>
     
     <div class="header-right">
@@ -557,7 +558,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     const bodyHalfW = 34; // Body X half-width
     const bodyHalfL = 46; // Body Y half-length
 
-    // Leg mount definitions matching exact Nano hardware layout:
+    // Quadruped leg mount positions on chassis:
     // 0: Front-Right, 1: Rear-Right, 2: Front-Left, 3: Rear-Left
     const legMounts = [
       { sideX: 1, frontY: -1, name: "FR" },  // Leg 0: Front-Right
@@ -622,7 +623,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         const hipY = m.frontY * bodyHalfL;
         const hipZ = bodyElevZ;
 
-        // 2. Exact Inverse-to-Forward Trigonometry (Nano Exact Kinematics Math)
+        // 2. Exact Inverse-to-Forward Trigonometry (Kinematics Vector Math)
         const w_mm = Math.sqrt(x_mm * x_mm + y_mm * y_mm);
         const v_mm = w_mm - 72.5; // distance beyond Coxa
         const gamma = (w_mm >= 0) ? Math.atan2(y_mm, x_mm) : Math.atan2(-y_mm, -x_mm);
@@ -910,6 +911,7 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
       <a href="/" class="nav-tab">🎮 Commander</a>
       <a href="/calib" class="nav-tab active">🎯 Calibrator</a>
       <a href="/setup" class="nav-tab">⚙️ Setup</a>
+      <a href="/update" class="nav-tab">🚀 Update</a>
     </nav>
     
     <div class="header-right">
@@ -1328,6 +1330,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       <a href="/" class="nav-tab">🎮 Commander</a>
       <a href="/calib" class="nav-tab">🎯 Calibrator</a>
       <a href="/setup" class="nav-tab active">⚙️ Setup</a>
+      <a href="/update" class="nav-tab">🚀 Update</a>
     </nav>
     
     <div class="header-right">
@@ -1684,6 +1687,442 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     fetchWifiStatus();
     setInterval(fetchWifiStatus, 3000);
     setTimeout(triggerScan, 400);
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// =============================================================================
+// 4. OTA FIRMWARE UPDATE PAGE HTML (http://arkbot.local/update)
+// =============================================================================
+const char UPDATE_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ARK-BOT Firmware Update | Wireless OTA</title>
+  <style>
+    :root {
+      --bg: #070a0f;
+      --card-bg: #0f1523;
+      --card-border: #1e293b;
+      --text-main: #f1f5f9;
+      --text-dim: #94a3b8;
+      --cyan: #00f0ff;
+      --cyan-glow: rgba(0, 240, 255, 0.4);
+      --accent: #3b82f6;
+      --purple: #a855f7;
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.4);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.4);
+      --yellow: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text-main); padding: 12px; max-width: 1000px; margin: 0 auto; padding-bottom: 50px; }
+    
+    /* Header */
+    header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--card-bg); border-radius: 14px; border: 1px solid var(--card-border); margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); flex-wrap: wrap; gap: 12px; }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-logo { width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 0 10px var(--cyan-glow)); transition: transform 0.25s ease, filter 0.25s ease; cursor: pointer; }
+    .brand-logo:hover { transform: scale(1.08) rotate(3deg); filter: drop-shadow(0 0 18px rgba(0, 240, 255, 0.9)); }
+    .title h1 { font-size: 20px; font-weight: 800; letter-spacing: 0.8px; background: linear-gradient(90deg, #ffffff, var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .title p { font-size: 11px; color: var(--text-dim); }
+    
+    /* Nav Tabs */
+    .nav-tabs { display: flex; gap: 6px; background: rgba(0,0,0,0.4); padding: 4px; border-radius: 10px; border: 1px solid var(--card-border); }
+    .nav-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 700; text-decoration: none; color: var(--text-dim); transition: all 0.2s ease; }
+    .nav-tab:hover { color: var(--text-main); background: rgba(255,255,255,0.05); }
+    .nav-tab.active { background: linear-gradient(135deg, rgba(0,240,255,0.2), rgba(59,130,246,0.3)); color: var(--cyan); border: 1px solid var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
+
+    .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    
+    /* RF Antenna Widget */
+    .rf-widget { display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.35); padding: 4px 8px; border-radius: 10px; border: 1px solid var(--card-border); }
+    .rf-label { font-size: 10px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .rf-btns { display: flex; gap: 3px; }
+    .rf-btn { background: #182236; border: 1px solid rgba(255,255,255,0.06); color: var(--text-dim); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.15s ease; }
+    .rf-btn:hover { color: #fff; border-color: var(--cyan); }
+    .rf-btn.active { background: linear-gradient(135deg, var(--cyan), var(--accent)); color: #000; font-weight: 800; border: none; box-shadow: 0 0 10px var(--cyan-glow); }
+    .rssi-badge { font-size: 10px; font-weight: 700; color: #34d399; background: rgba(16, 185, 129, 0.12); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    .badge { padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-online { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #059669; box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); }
+    .badge-offline { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid #dc2626; box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
+
+    /* Layout Cards */
+    .grid-container { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 20px; }
+    @media(min-width: 800px) { .grid-container { grid-template-columns: 2fr 1fr; } }
+
+    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .card-title { font-size: 14px; font-weight: 800; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; gap: 8px; }
+    
+    /* Drop Zone */
+    .dropzone { border: 2px dashed #0284c7; background: rgba(2, 132, 199, 0.05); border-radius: 12px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease; position: relative; }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--cyan); background: rgba(0, 240, 255, 0.12); transform: scale(1.01); box-shadow: 0 0 20px var(--cyan-glow); }
+    .dropzone-icon { font-size: 48px; margin-bottom: 12px; filter: drop-shadow(0 0 8px var(--cyan-glow)); }
+    .dropzone-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+    .dropzone-sub { font-size: 12px; color: var(--text-dim); }
+    .file-input { display: none; }
+
+    /* File Info Box */
+    .file-details { display: none; background: #131b2e; border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; margin-top: 16px; }
+    .file-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+    .file-label { color: var(--text-dim); font-weight: 600; }
+    .file-val { color: var(--cyan); font-weight: 700; }
+
+    /* Action Buttons */
+    .btn-action { width: 100%; padding: 14px; margin-top: 18px; border-radius: 10px; border: none; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .btn-flash { background: linear-gradient(135deg, #0284c7, #00f0ff); color: #000; box-shadow: 0 4px 16px var(--cyan-glow); }
+    .btn-flash:hover:not(:disabled) { background: linear-gradient(135deg, #00f0ff, #38bdf8); transform: translateY(-2px); box-shadow: 0 6px 24px var(--cyan-glow); }
+    .btn-flash:disabled { background: #1e293b; color: #64748b; cursor: not-allowed; box-shadow: none; }
+
+    /* Progress Bar */
+    .progress-box { display: none; margin-top: 20px; }
+    .progress-meta { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--text-dim); }
+    .progress-track { width: 100%; height: 16px; background: #070a12; border-radius: 8px; border: 1px solid var(--card-border); overflow: hidden; position: relative; }
+    .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0284c7, var(--cyan)); border-radius: 8px; transition: width 0.15s linear; box-shadow: 0 0 12px var(--cyan-glow); }
+
+    /* Info Table */
+    .info-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .info-table td { padding: 10px 6px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .info-table td:first-child { color: var(--text-dim); font-weight: 600; width: 40%; }
+    .info-table td:last-child { color: var(--text-main); font-weight: 700; text-align: right; }
+
+    /* Notice Callout */
+    .callout { background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--accent); padding: 12px 14px; border-radius: 0 8px 8px 0; font-size: 11px; line-height: 1.5; color: #cbd5e1; margin-top: 14px; }
+
+    /* Success Modal */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 999; }
+    .modal-overlay.show { display: flex; }
+    .modal-card { background: #0f172a; border: 1px solid var(--cyan); box-shadow: 0 0 32px var(--cyan-glow); border-radius: 16px; padding: 28px; width: 90%; max-width: 440px; text-align: center; }
+    .modal-icon { font-size: 54px; margin-bottom: 12px; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    .modal-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+    .modal-body { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin-bottom: 20px; }
+
+    /* App Footer */
+    .app-footer { margin-top: 36px; padding-top: 22px; border-top: 1px solid rgba(255, 255, 255, 0.08); text-align: center; }
+    .footer-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .footer-brand { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; color: var(--text-dim); letter-spacing: 1.2px; text-transform: uppercase; }
+    .footer-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); }
+    .footer-credit { font-size: 13px; color: #cbd5e1; font-weight: 500; }
+    .author-name { font-weight: 800; color: #ffffff; background: linear-gradient(90deg, #ffffff, var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .footer-org { font-size: 11px; color: var(--text-dim); letter-spacing: 0.5px; }
+
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #10b981; color: white; padding: 10px 22px; border-radius: 30px; font-size: 13px; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,0.6); opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 1000; border: 1px solid rgba(255,255,255,0.2); }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
+      <div class="title">
+        <h1>ARK-BOT</h1>
+        <p>Firmware OTA Manager (v1.0.4)</p>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <a href="/" class="nav-tab">🎮 Commander</a>
+      <a href="/calib" class="nav-tab">🎯 Calibrator</a>
+      <a href="/setup" class="nav-tab">⚙️ Setup</a>
+      <a href="/update" class="nav-tab active">🚀 Update</a>
+    </nav>
+    
+    <div class="header-right">
+      <!-- Antenna Control -->
+      <div class="rf-widget">
+        <span class="rf-label">Antenna:</span>
+        <div class="rf-btns">
+          <button class="rf-btn active" id="btnAntInt" onclick="setAntenna('internal')" title="Switch to Onboard Ceramic Antenna">📡 Int</button>
+          <button class="rf-btn" id="btnAntExt" onclick="setAntenna('external')" title="Switch to External IPEX/U.FL Antenna">🛰️ Ext</button>
+        </div>
+        <span class="rssi-badge" id="rssiVal">📶 -- dBm</span>
+      </div>
+      
+      <div id="botStatus" class="badge badge-online">STATUS: READY</div>
+    </div>
+  </header>
+
+  <div class="grid-container">
+    <!-- Left Column: OTA Flasher Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span>🚀 Wireless Firmware Flasher</span>
+        </div>
+        <span style="font-size:11px; font-weight:700; color:var(--text-dim);">ESP32-C6 OTA</span>
+      </div>
+
+      <!-- File Dropzone -->
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+        <div class="dropzone-icon">📥</div>
+        <div class="dropzone-title">Click to Select or Drop Firmware (.bin)</div>
+        <div class="dropzone-sub">Accepts compiled PlatformIO firmware binary (firmware.bin)</div>
+        <input type="file" id="fileInput" class="file-input" accept=".bin" onchange="handleFileSelect(event)">
+      </div>
+
+      <!-- File Details Box -->
+      <div class="file-details" id="fileDetails">
+        <div class="file-row">
+          <span class="file-label">Binary File:</span>
+          <span class="file-val" id="fileName">firmware.bin</span>
+        </div>
+        <div class="file-row">
+          <span class="file-label">File Size:</span>
+          <span class="file-val" id="fileSize">-- KB</span>
+        </div>
+        <div class="file-row">
+          <span class="file-label">Target Partition:</span>
+          <span class="file-val" style="color:#34d399;">OTA App Flash</span>
+        </div>
+      </div>
+
+      <!-- Progress Box -->
+      <div class="progress-box" id="progressBox">
+        <div class="progress-meta">
+          <span id="progressStatus">Uploading firmware...</span>
+          <span id="progressPercent" style="color:var(--cyan);">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+
+      <!-- Flash Action Button -->
+      <button class="btn-action btn-flash" id="btnFlash" disabled onclick="startOtaUpdate()">
+        <span>⚡ START OTA FIRMWARE FLASH</span>
+      </button>
+
+      <div class="callout">
+        <strong>⚠️ Important Notes:</strong><br>
+        &bull; Ensure the robot battery/power supply is stable before flashing.<br>
+        &bull; Do not disconnect or refresh this browser window during the upload.<br>
+        &bull; ARK-BOT will automatically reboot and reconnect upon successful verification.
+      </div>
+    </div>
+
+    <!-- Right Column: System Status Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span>⚙️ System Info</span>
+        </div>
+      </div>
+
+      <table class="info-table">
+        <tr>
+          <td>Robot Name</td>
+          <td>ARK-BOT</td>
+        </tr>
+        <tr>
+          <td>Current Version</td>
+          <td style="color:var(--cyan);">v1.0.4</td>
+        </tr>
+        <tr>
+          <td>Hardware MCU</td>
+          <td>Seeed XIAO ESP32-C6</td>
+        </tr>
+        <tr>
+          <td>Architecture</td>
+          <td>32-bit RISC-V @ 160MHz</td>
+        </tr>
+        <tr>
+          <td>Flash Memory</td>
+          <td>4MB Quad-SPI</td>
+        </tr>
+        <tr>
+          <td>OTA Method</td>
+          <td>Direct HTTP POST /update</td>
+        </tr>
+      </table>
+
+      <div style="margin-top:20px;">
+        <button class="btn-action" style="background:#1e293b; color:#94a3b8; border:1px solid var(--card-border);" onclick="location.href='/'">
+          <span>⬅️ Back to Commander</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Success / Rebooting Modal -->
+  <div class="modal-overlay" id="successModal">
+    <div class="modal-card">
+      <div class="modal-icon">🎉</div>
+      <div class="modal-title">Firmware Update Complete!</div>
+      <div class="modal-body">
+        The new firmware was flashed and verified successfully.<br>
+        ARK-BOT is restarting now. Reconnecting in <span id="rebootCount" style="color:var(--cyan); font-weight:800;">10</span>s...
+      </div>
+      <div class="progress-track" style="height:8px; margin-bottom:12px;">
+        <div class="progress-fill" id="modalProgress" style="width:100%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Footer -->
+  <footer class="app-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="footer-dot"></span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
+      </div>
+      <div class="footer-credit">
+        Designed & Engineered by <span class="author-name">Amuthesan</span>
+      </div>
+      <div class="footer-org">Ark Technology</div>
+    </div>
+  </footer>
+
+  <div id="toast">Command Sent</div>
+
+  <script>
+    let selectedFile = null;
+
+    const dropzone = document.getElementById('dropzone');
+    ['dragenter', 'dragover'].forEach(name => {
+      dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); }, false);
+    });
+    ['dragleave', 'drop'].forEach(name => {
+      dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); }, false);
+    });
+    dropzone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      if (files.length > 0) processFile(files[0]);
+    });
+
+    function handleFileSelect(event) {
+      if (event.target.files.length > 0) {
+        processFile(event.target.files[0]);
+      }
+    }
+
+    function processFile(file) {
+      if (!file.name.toLowerCase().endsWith('.bin')) {
+        showToast("⚠️ Invalid file! Please choose a .bin firmware binary.");
+        return;
+      }
+      selectedFile = file;
+      document.getElementById('fileName').innerText = file.name;
+      document.getElementById('fileSize').innerText = `${(file.size / 1024).toFixed(1)} KB (${file.size.toLocaleString()} bytes)`;
+      document.getElementById('fileDetails').style.display = 'block';
+      document.getElementById('btnFlash').disabled = false;
+      showToast(`Selected: ${file.name}`);
+    }
+
+    function startOtaUpdate() {
+      if (!selectedFile) return;
+
+      if (!confirm(`Flash "${selectedFile.name}" (${(selectedFile.size / 1024).toFixed(1)} KB) to ARK-BOT now?`)) {
+        return;
+      }
+
+      const btnFlash = document.getElementById('btnFlash');
+      const progBox = document.getElementById('progressBox');
+      const progFill = document.getElementById('progressFill');
+      const progPercent = document.getElementById('progressPercent');
+      const progStatus = document.getElementById('progressStatus');
+
+      btnFlash.disabled = true;
+      btnFlash.innerText = "⚡ FLASHING FIRMWARE...";
+      progBox.style.display = 'block';
+
+      const formData = new FormData();
+      formData.append("update", selectedFile, selectedFile.name);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/update", true);
+
+      xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          progFill.style.width = pct + '%';
+          progPercent.innerText = pct + '%';
+          progStatus.innerText = `Uploading: ${(e.loaded / 1024).toFixed(0)} KB / ${(e.total / 1024).toFixed(0)} KB`;
+        }
+      };
+
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          progFill.style.width = '100%';
+          progPercent.innerText = '100%';
+          progStatus.innerText = "Upload Complete! Verifying & rebooting...";
+          showSuccessModal();
+        } else {
+          showToast("❌ OTA Update Failed! Check binary format.");
+          btnFlash.disabled = false;
+          btnFlash.innerText = "⚡ START OTA FIRMWARE FLASH";
+        }
+      };
+
+      xhr.onerror = function() {
+        showToast("❌ Network error during firmware upload!");
+        btnFlash.disabled = false;
+        btnFlash.innerText = "⚡ START OTA FIRMWARE FLASH";
+      };
+
+      xhr.send(formData);
+    }
+
+    function showSuccessModal() {
+      const modal = document.getElementById('successModal');
+      modal.classList.add('show');
+      let seconds = 10;
+      const countElem = document.getElementById('rebootCount');
+      const timer = setInterval(() => {
+        seconds--;
+        if (seconds > 0) {
+          countElem.innerText = seconds;
+        } else {
+          clearInterval(timer);
+          location.href = '/';
+        }
+      }, 1000);
+    }
+
+    async function setAntenna(type) {
+      showToast(`Switching to ${type.toUpperCase()} Antenna...`);
+      try {
+        const res = await fetch(`/api/antenna?type=${type}`, { method: 'POST' });
+        const data = await res.json();
+        updateAntennaUI(data.extAntenna, data.rssi);
+      } catch (err) {}
+    }
+
+    function updateAntennaUI(isExt, rssi) {
+      const btnInt = document.getElementById('btnAntInt');
+      const btnExt = document.getElementById('btnAntExt');
+      const rssiBadge = document.getElementById('rssiVal');
+      if (btnInt && btnExt) {
+        btnInt.className = isExt ? 'rf-btn' : 'rf-btn active';
+        btnExt.className = isExt ? 'rf-btn active' : 'rf-btn';
+      }
+      if (rssiBadge && rssi !== undefined) rssiBadge.innerText = `📶 ${rssi} dBm`;
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.extAntenna !== undefined) updateAntennaUI(data.extAntenna, data.rssi);
+      } catch (err) {}
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    fetchStatus();
   </script>
 </body>
 </html>

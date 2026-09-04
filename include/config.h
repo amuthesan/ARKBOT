@@ -111,16 +111,16 @@ const float STAND_SEAT_SPEED  = 2.0f;
 // 4 Legs: 0: Front-Right (FR), 1: Rear-Right (RR), 2: Front-Left (FL), 3: Rear-Left (RL)
 // 3 Joints per leg: 0: Coxa/Hip, 1: Femur/Thigh, 2: Tibia/Calf
 //
-// Mapped to PCA9685 channels directly corresponding to original Arduino pins (D2..D13):
-// - Leg 0 (FR): Coxa D4  (CH 4),  Femur D2  (CH 2),  Tibia D3  (CH 3)
-// - Leg 1 (RR): Coxa D7  (CH 7),  Femur D5  (CH 5),  Tibia D6  (CH 6)
-// - Leg 2 (FL): Coxa D10 (CH 10), Femur D8  (CH 8),  Tibia D9  (CH 9)
-// - Leg 3 (RL): Coxa D13 (CH 13), Femur D11 (CH 11), Tibia D12 (CH 12)
+// PCA9685 PWM Channel Assignments (Channels 2..13):
+// - Leg 0 (FR): Coxa (CH 4),  Femur (CH 2),  Tibia (CH 3)
+// - Leg 1 (RR): Coxa (CH 7),  Femur (CH 5),  Tibia (CH 6)
+// - Leg 2 (FL): Coxa (CH 10), Femur (CH 8),  Tibia (CH 9)
+// - Leg 3 (RL): Coxa (CH 13), Femur (CH 11), Tibia (CH 12)
 const int SERVO_CHANNELS[NUM_LEGS][SERVOS_PER_LEG] = {
-    {4, 2, 3},    // Leg 0: Front-Right (Coxa D4, Femur D2, Tibia D3)
-    {7, 5, 6},    // Leg 1: Rear-Right  (Coxa D7, Femur D5, Tibia D6)
-    {10, 8, 9},   // Leg 2: Front-Left  (Coxa D10, Femur D8, Tibia D9)
-    {13, 11, 12}  // Leg 3: Rear-Left   (Coxa D13, Femur D11, Tibia D12)
+    {4, 2, 3},    // Leg 0: Front-Right (Coxa CH4, Femur CH2, Tibia CH3)
+    {7, 5, 6},    // Leg 1: Rear-Right  (Coxa CH7, Femur CH5, Tibia CH6)
+    {10, 8, 9},   // Leg 2: Front-Left  (Coxa CH10, Femur CH8, Tibia CH9)
+    {13, 11, 12}  // Leg 3: Rear-Left   (Coxa CH13, Femur CH11, Tibia CH12)
 };
 
 // Leg names for display and UI

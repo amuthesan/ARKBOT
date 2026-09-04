@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Update.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 #include <Adafruit_GFX.h>
@@ -20,7 +21,7 @@ WebServer server(80);
 Preferences preferences;
 
 // ==========================================
-// Original Arduino Nano Kinematics Constants
+// ARK-BOT Kinematics Geometry Dimensions
 // ==========================================
 const float length_a = 84.0f;    // Femur
 const float length_b = 145.0f;   // Tibia
@@ -56,7 +57,7 @@ const float turn_y1 = y_start + y_step / 2;
 const float turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
 const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
 
-// 1-to-1 Nano pin to PCA9685 port mapping:
+// PCA9685 Servo Channel Mapping:
 // servo_pin[4][3] = { {2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} }
 const int servo_pin[4][3] = {
     {2, 3, 4},     // Leg 0 (FR)
@@ -263,7 +264,7 @@ void setLegPower(int leg, bool enable) {
 }
 
 // ==========================================
-// Exact Original Arduino Nano Kinematics Implementation
+// Quadruped Kinematics Implementation
 // ==========================================
 void initKinematicsSites() {
     set_site(0, x_default - x_offset, y_start + y_step, z_boot);
@@ -876,7 +877,7 @@ void executeAction(const String& act, int steps, float spd) {
 }
 
 // ==========================================
-// Serial Command Interface (Nano Bluetooth backwards compatibility)
+// Serial Command Interface & Locomotion Protocol
 // ==========================================
 // w 0 1: stand | w 0 0: sit | w 1 x: fwd | w 2 x: back | w 3 x: right | w 4 x: left | w 5 x: shake | w 6 x: wave
 // ==========================================
@@ -1020,7 +1021,7 @@ void parseSerialCommand(const String& cmd) {
         }
     }
 
-    // 2. Legacy Nano Bluetooth Protocol ("w <mode> <steps>")
+    // 2. Legacy Locomotion Action Protocol ("w <mode> <steps>")
     if (trimmed.startsWith("w ") || trimmed.startsWith("W ")) {
         int firstSpace = trimmed.indexOf(' ');
         int secondSpace = trimmed.indexOf(' ', firstSpace + 1);
@@ -1441,6 +1442,67 @@ void handleReboot() {
 }
 
 // ==========================================
+// OTA (Over-The-Air) Firmware Update Handlers
+// ==========================================
+void handleUpdatePage() {
+    server.send_P(200, "text/html", UPDATE_HTML);
+}
+
+void handleUpdateDone() {
+    server.sendHeader("Connection", "close");
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (Update.hasError()) {
+        server.send(500, "application/json", "{\"status\":\"error\",\"error\":\"OTA Update Failed\"}");
+    } else {
+        server.send(200, "application/json", "{\"status\":\"success\",\"message\":\"Update completed. Rebooting...\"}");
+        delay(800);
+        ESP.restart();
+    }
+}
+
+void handleUpdateUpload() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("[OTA] Update started: %s\n", upload.filename.c_str());
+        kinematicsActive = false; // Suspend kinematics calculations during flash
+        if (oledReady) {
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setTextColor(SSD1306_WHITE);
+            display.setCursor(0, 0);
+            display.println(F("ARK-BOT OTA UPDATE"));
+            display.drawFastHLine(0, 10, SCREEN_WIDTH, SSD1306_WHITE);
+            display.setCursor(0, 24);
+            display.println(F("Receiving firmware..."));
+            display.display();
+        }
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+            Update.printError(Serial);
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            Update.printError(Serial);
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {
+            Serial.printf("[OTA] Success: %u bytes\n", upload.totalSize);
+            if (oledReady) {
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(SSD1306_WHITE);
+                display.setCursor(0, 10);
+                display.println(F("OTA SUCCESS!"));
+                display.setCursor(0, 30);
+                display.println(F("Rebooting ARK-BOT..."));
+                display.display();
+            }
+        } else {
+            Update.printError(Serial);
+        }
+    }
+}
+
+// ==========================================
 // Setup & Loop
 // ==========================================
 void setup() {
@@ -1496,6 +1558,8 @@ void setup() {
     server.on("/setup", HTTP_GET, handleSetup);
     server.on("/api/status", HTTP_GET, handleStatus);
     server.on("/api/action", HTTP_POST, handleAction);
+    server.on("/update", HTTP_GET, handleUpdatePage);
+    server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
     server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
     server.on("/api/wifi/status", HTTP_GET, handleWifiStatus);
     server.on("/api/wifi/save", HTTP_POST, handleWifiSave);
