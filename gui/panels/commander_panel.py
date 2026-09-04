@@ -27,15 +27,22 @@ class CommanderPanel(QWidget):
         main_layout.setSpacing(14)
 
         # 1. Postures & Emergency Stop
-        posture_group = QGroupBox("CORE POSTURES")
-        posture_layout = QHBoxLayout(posture_group)
+        posture_group = QGroupBox("CORE POSTURES & ELEVATION")
+        posture_layout = QGridLayout(posture_group)
         posture_layout.setSpacing(10)
 
-        self.btn_stand = QPushButton("🧍 STAND")
+        self.btn_stand = QPushButton("🧍 STAND (-100mm)")
         self.btn_stand.setObjectName("btn_stand")
         self.btn_stand.clicked.connect(lambda: self._trigger_action("stand"))
 
-        self.btn_sit = QPushButton("🪑 SIT")
+        self.btn_stand_high = QPushButton("🦒 STAND HIGH (-130mm)")
+        self.btn_stand_high.setObjectName("btn_stand_high")
+        self.btn_stand_high.setStyleSheet(
+            "background-color: #0f766e; border: 1px solid #14b8a6; color: #ccfbf1; font-weight: bold;"
+        )
+        self.btn_stand_high.clicked.connect(lambda: self._trigger_action("stand_high"))
+
+        self.btn_sit = QPushButton("🪑 SIT (-56mm)")
         self.btn_sit.setObjectName("btn_sit")
         self.btn_sit.clicked.connect(lambda: self._trigger_action("sit"))
 
@@ -43,9 +50,10 @@ class CommanderPanel(QWidget):
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.clicked.connect(lambda: self._trigger_action("stop"))
 
-        posture_layout.addWidget(self.btn_stand)
-        posture_layout.addWidget(self.btn_sit)
-        posture_layout.addWidget(self.btn_stop)
+        posture_layout.addWidget(self.btn_stand, 0, 0)
+        posture_layout.addWidget(self.btn_stand_high, 0, 1)
+        posture_layout.addWidget(self.btn_sit, 1, 0)
+        posture_layout.addWidget(self.btn_stop, 1, 1)
         main_layout.addWidget(posture_group)
 
         # 2. Locomotion D-Pad

@@ -261,8 +261,16 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         <button class="btn-gesture btn-stand" onclick="sendAction('stand')">
           <span class="g-icon">🧍</span>
           <div class="g-info">
-            <div>Stand Up</div>
+            <div>Stand Normal</div>
             <div class="g-sub">Height -100mm</div>
+          </div>
+        </button>
+
+        <button class="btn-gesture btn-stand" style="border-left-color: #14b8a6;" onclick="sendAction('stand_high')">
+          <span class="g-icon">🦒</span>
+          <div class="g-info">
+            <div>Stand High</div>
+            <div class="g-sub">Height -130mm</div>
           </div>
         </button>
 

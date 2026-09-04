@@ -29,6 +29,7 @@ const float length_side = 145.4f;// Base size
 const float z_absolute = -56.0f;
 
 const float z_default = -100.0f;
+const float z_high = -130.0f;
 const float z_up = -60.0f;
 const float z_boot = z_absolute;
 const float x_default = 124.0f;
@@ -373,7 +374,7 @@ void wait_all_reach() {
 }
 
 bool is_stand() {
-    return (fabs(site_now[0][2] - z_default) < 2.0f);
+    return (site_now[0][2] <= -85.0f);
 }
 
 // 50Hz FreeRTOS Kinematics Task (replaces Arduino FlexiTimer2)
@@ -423,6 +424,16 @@ void stand() {
     }
     wait_all_reach();
     currentMode = "STAND";
+}
+
+void stand_high(float target_z = z_high) {
+    move_speed = stand_seat_speed;
+    currentMode = "STAND HIGH";
+    for (int leg = 0; leg < 4; leg++) {
+        set_site(leg, KEEP, KEEP, target_z);
+    }
+    wait_all_reach();
+    currentMode = "STAND HIGH";
 }
 
 void step_forward(unsigned int step) {
@@ -790,6 +801,8 @@ void actionTask(void* parameter) {
                 if (!is_stand()) stand();
                 currentMode = "TURN 180° RIGHT";
                 turn_right(8);
+            } else if (act == "stand_high" || act == "stand_tall" || act == "tall" || act == "high") {
+                stand_high(z_high);
             } else if (act == "stand") {
                 stand();
             } else if (act == "sit") {

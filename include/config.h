@@ -19,6 +19,7 @@ const float LENGTH_SIDE = 145.4f;   // Body chassis base width/length
 // Movement & Stance Z Coordinates
 const float Z_ABSOLUTE  = -56.0f;   // Mechanical rest/sit height
 const float Z_DEFAULT   = -100.0f;  // Normal standing height
+const float Z_HIGH      = -130.0f;  // High/tall standing height
 const float Z_UP        = -60.0f;   // Swing phase leg lift clearance
 const float Z_BOOT      = Z_ABSOLUTE;
 
