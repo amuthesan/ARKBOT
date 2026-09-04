@@ -306,6 +306,13 @@ void sampleMPU6050() {
     int16_t rawGy = (Wire.read() << 8) | Wire.read();
     int16_t rawGz = (Wire.read() << 8) | Wire.read();
 
+    #if defined(IMU_MOUNT_YAW_180) && IMU_MOUNT_YAW_180
+    rawAx = -rawAx;
+    rawAy = -rawAy;
+    rawGx = -rawGx;
+    rawGy = -rawGy;
+    #endif
+
     // Convert raw to engineering units (+/- 4g -> 8192 LSB/g, +/- 500 deg/s -> 65.5 LSB/deg/s)
     imuAx = (float)rawAx / 8192.0f;
     imuAy = (float)rawAy / 8192.0f;
@@ -338,7 +345,7 @@ void sampleMPU6050() {
 
 void calibrateMPU6050() {
     if (!imuReady) return;
-    Serial.println(F("[IMU] Calibrating level zero offsets... Keep robot still."));
+    Serial.println(F("[IMU] Calibrating level zero offsets (Yaw 180° Frame)... Keep robot still."));
 
     float sumAx = 0, sumAy = 0, sumAz = 0;
     float sumGx = 0, sumGy = 0, sumGz = 0;
@@ -356,6 +363,13 @@ void calibrateMPU6050() {
             int16_t gx = (Wire.read() << 8) | Wire.read();
             int16_t gy = (Wire.read() << 8) | Wire.read();
             int16_t gz = (Wire.read() << 8) | Wire.read();
+
+            #if defined(IMU_MOUNT_YAW_180) && IMU_MOUNT_YAW_180
+            ax = -ax;
+            ay = -ay;
+            gx = -gx;
+            gy = -gy;
+            #endif
 
             sumAx += (float)ax / 8192.0f;
             sumAy += (float)ay / 8192.0f;

@@ -98,12 +98,13 @@ const float STAND_SEAT_SPEED  = 2.0f;
 #define NVS_KEY_BAT_MULT             "bat_mult"
 
 
-// I2C Addresses
+// I2C Addresses & IMU Configuration
 #define OLED_I2C_ADDRESS        0x3C  // 0.96" SSD1306 OLED (128x64)
 #define PCA9685_I2C_ADDRESS     0x40  // PCA9685 16-Channel PWM Servo Driver
 #define MPU6050_I2C_ADDRESS     0x68  // MPU6050 6-Axis IMU (Primary)
 #define MPU6050_I2C_ALT_ADDRESS 0x69  // MPU6050 6-Axis IMU (Alternate AD0=High)
 #define IMU_FILTER_ALPHA        0.98f // Complementary filter weight (98% Gyro + 2% Accel)
+#define IMU_MOUNT_YAW_180       true  // IMU mounted with 180 deg yaw rotation relative to forward body frame
 
 
 // OLED Display Configuration
