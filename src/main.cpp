@@ -20,39 +20,57 @@ WebServer server(80);
 Preferences preferences;
 
 // ==========================================
-// Kinematics & Coordinate Tracking State
+// Original Arduino Nano Kinematics Constants
 // ==========================================
-// 4 Legs: 0: FR, 1: RR, 2: FL, 3: RL
-// 3 Coordinates per leg: 0: X, 1: Y, 2: Z
+const float length_a = 84.0f;    // Femur
+const float length_b = 145.0f;   // Tibia
+const float length_c = 72.5f;    // Coxa
+const float length_side = 145.4f;// Base size
+const float z_absolute = -56.0f;
+
+const float z_default = -100.0f;
+const float z_up = -60.0f;
+const float z_boot = z_absolute;
+const float x_default = 124.0f;
+const float x_offset = 0.0f;
+const float y_start = 0.0f;
+const float y_step = 80.0f;
+
+const float spot_turn_speed = 5.0f;
+const float leg_move_speed = 10.0f;
+const float body_move_speed = 4.0f;
+const float stand_seat_speed = 2.0f;
+
+const float KEEP = 255.0f;
+const float pi = 3.14159265358979323846f;
+
+// Precalculated turn constants
+const float temp_a = sqrt(pow(2 * x_default + length_side, 2) + pow(y_step, 2));
+const float temp_b = 2 * (y_start + y_step) + length_side;
+const float temp_c = sqrt(pow(2 * x_default + length_side, 2) + pow(2 * y_start + y_step + length_side, 2));
+const float temp_alpha = acos((pow(temp_a, 2) + pow(temp_b, 2) - pow(temp_c, 2)) / 2 / temp_a / temp_b);
+
+const float turn_x1 = (temp_a - length_side) / 2;
+const float turn_y1 = y_start + y_step / 2;
+const float turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
+const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
+
+// 1-to-1 Nano pin to PCA9685 port mapping:
+// servo_pin[4][3] = { {2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} }
+const int servo_pin[4][3] = {
+    {2, 3, 4},     // Leg 0 (FR)
+    {5, 6, 7},     // Leg 1 (RR)
+    {8, 9, 10},    // Leg 2 (FL)
+    {11, 12, 13}   // Leg 3 (RL)
+};
+
+// Real-time coordinates & speed
 volatile float site_now[4][3];
 volatile float site_expect[4][3];
 float temp_speed[4][3];
-float move_speed = STAND_SEAT_SPEED;
+float move_speed = stand_seat_speed;
 float speed_multiple = 1.0f;
-volatile int rest_counter = 0;
-const float KEEP = 255.0f;
-
-// Precalculated turning parameters
-float temp_a;
-float temp_b;
-float temp_c;
-float temp_alpha;
-float turn_x1;
-float turn_y1;
-float turn_x0;
-float turn_y0;
-
-// Hardware Channel Mapping:
-// Leg 0 (FR): Femur CH 2, Tibia CH 3, Coxa CH 4
-// Leg 1 (RR): Femur CH 5, Tibia CH 6, Coxa CH 7
-// Leg 2 (FL): Femur CH 8, Tibia CH 9, Coxa CH 10
-// Leg 3 (RL): Femur CH 11, Tibia CH 13, Coxa CH 12
-const int KIN_SERVO_CH[4][3] = {
-    {2, 3, 4},
-    {5, 6, 7},
-    {8, 9, 10},
-    {11, 13, 12}
-};
+int rest_counter = 0;
 
 // State Tracking
 int currentAngles[NUM_LEGS][SERVOS_PER_LEG];
@@ -62,7 +80,11 @@ bool pcaReady = false;
 bool wifiStaConnected = false;
 bool useExternalAntenna = false;
 String activeIp = "192.168.4.1";
-String currentMode = "STAND";
+String currentMode = "ALL @ 90deg";
+
+// Kinematics active flag: ONLY true when running an action (Stand, Sit, Walk, etc.)
+// When in Calibration mode, this is false so calibration 90° and sliders are NEVER overwritten!
+volatile bool kinematicsActive = false;
 volatile bool isActionRunning = false;
 volatile bool stopRequested = false;
 
@@ -99,6 +121,9 @@ void hand_wave(int i);
 void hand_shake(int i);
 void executeAction(const String& act, int steps, float spd);
 void parseSerialCommand(const String& cmd);
+void calibrateAllServos(bool sequential);
+void drawMainDashboard(bool heartbeat, int cycleIndex);
+void drawSplashScreen();
 
 // ==========================================
 // Seeed Studio XIAO ESP32-C6 Antenna Control
@@ -112,7 +137,7 @@ void initAntenna() {
 
 void setAntenna(bool external, bool persist = true) {
     pinMode(ANT_PWR_PIN, OUTPUT);
-    digitalWrite(ANT_PWR_PIN, LOW); // Active LOW power
+    digitalWrite(ANT_PWR_PIN, LOW);
     delay(10);
 
     pinMode(ANT_SEL_PIN, OUTPUT);
@@ -148,12 +173,9 @@ void playTone(int freq, int durationMs) {
 }
 
 void playBootChime() {
-    playTone(1047, 70);
-    delay(30);
-    playTone(1319, 70);
-    delay(30);
-    playTone(1568, 70);
-    delay(30);
+    playTone(1047, 70); delay(30);
+    playTone(1319, 70); delay(30);
+    playTone(1568, 70); delay(30);
     playTone(2093, 120);
 }
 
@@ -180,11 +202,37 @@ void setServoAngle(int channel, int angle) {
     pwm.setPWM(channel, 0, pulse);
 }
 
+// ==========================================
+// Calibration & Manual Power Controls
+// ==========================================
+void calibrateAllServos(bool sequential) {
+    kinematicsActive = false; // Disable kinematics solver from overwriting calibration!
+    isActionRunning = false;
+    currentMode = "ALL @ 90deg";
+
+    for (int l = 0; l < NUM_LEGS; l++) {
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
+            currentAngles[l][j] = DEFAULT_CALIBRATION_ANGLE;
+            servoEnabled[l][j] = true;
+            int ch = SERVO_CHANNELS[l][j];
+            setServoAngle(ch, DEFAULT_CALIBRATION_ANGLE);
+            if (sequential) {
+                playStepChime();
+                delay(70);
+            }
+        }
+    }
+    playReadyChime();
+    drawMainDashboard(true, 0);
+    Serial.println(F("[CALIB] All 12 servos centered to 90 degrees."));
+}
+
 void setMasterPower(bool enable) {
-    for (int l = 0; l < 4; l++) {
-        for (int j = 0; j < 3; j++) {
+    kinematicsActive = false;
+    for (int l = 0; l < NUM_LEGS; l++) {
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
             servoEnabled[l][j] = enable;
-            int ch = KIN_SERVO_CH[l][j];
+            int ch = SERVO_CHANNELS[l][j];
             if (enable) {
                 setServoAngle(ch, currentAngles[l][j]);
             } else if (pcaReady) {
@@ -197,7 +245,7 @@ void setMasterPower(bool enable) {
 }
 
 void setServoPower(int leg, int joint, bool enable) {
-    if (leg < 0 || leg >= 4 || joint < 0 || joint >= 3) return;
+    if (leg < 0 || leg >= NUM_LEGS || joint < 0 || joint >= SERVOS_PER_LEG) return;
     servoEnabled[leg][joint] = enable;
     int ch = SERVO_CHANNELS[leg][joint];
     if (enable) {
@@ -208,29 +256,19 @@ void setServoPower(int leg, int joint, bool enable) {
 }
 
 void setLegPower(int leg, bool enable) {
-    if (leg < 0 || leg >= 4) return;
-    for (int j = 0; j < 3; j++) setServoPower(leg, j, enable);
+    if (leg < 0 || leg >= NUM_LEGS) return;
+    for (int j = 0; j < SERVOS_PER_LEG; j++) setServoPower(leg, j, enable);
     playStepChime();
 }
 
 // ==========================================
-// Kinematics Core Mathematics & Inverse Kinematics
+// Exact Original Arduino Nano Kinematics Implementation
 // ==========================================
-void initKinematics() {
-    temp_a = sqrt(pow(2 * X_DEFAULT + LENGTH_SIDE, 2) + pow(Y_STEP, 2));
-    temp_b = 2 * (Y_START + Y_STEP) + LENGTH_SIDE;
-    temp_c = sqrt(pow(2 * X_DEFAULT + LENGTH_SIDE, 2) + pow(2 * Y_START + Y_STEP + LENGTH_SIDE, 2));
-    temp_alpha = acos((pow(temp_a, 2) + pow(temp_b, 2) - pow(temp_c, 2)) / (2 * temp_a * temp_b));
-    turn_x1 = (temp_a - LENGTH_SIDE) / 2.0f;
-    turn_y1 = Y_START + Y_STEP / 2.0f;
-    turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
-    turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - LENGTH_SIDE;
-
-    // Set default initial sites
-    site_expect[0][0] = X_DEFAULT - X_OFFSET; site_expect[0][1] = Y_START + Y_STEP; site_expect[0][2] = Z_BOOT;
-    site_expect[1][0] = X_DEFAULT - X_OFFSET; site_expect[1][1] = Y_START + Y_STEP; site_expect[1][2] = Z_BOOT;
-    site_expect[2][0] = X_DEFAULT + X_OFFSET; site_expect[2][1] = Y_START;          site_expect[2][2] = Z_BOOT;
-    site_expect[3][0] = X_DEFAULT + X_OFFSET; site_expect[3][1] = Y_START;          site_expect[3][2] = Z_BOOT;
+void initKinematicsSites() {
+    set_site(0, x_default - x_offset, y_start + y_step, z_boot);
+    set_site(1, x_default - x_offset, y_start + y_step, z_boot);
+    set_site(2, x_default + x_offset, y_start, z_boot);
+    set_site(3, x_default + x_offset, y_start, z_boot);
 
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 3; j++) {
@@ -242,56 +280,53 @@ void initKinematics() {
     }
 }
 
+// Mathematical model 2/2: Cartesian to Polar
 void cartesian_to_polar(float &alpha, float &beta, float &gamma, float x, float y, float z) {
     float v, w;
     w = (x >= 0 ? 1 : -1) * (sqrt(pow(x, 2) + pow(y, 2)));
-    v = w - LENGTH_C;
-    alpha = atan2(z, v) + acos((pow(LENGTH_A, 2) - pow(LENGTH_B, 2) + pow(v, 2) + pow(z, 2)) / (2 * LENGTH_A * sqrt(pow(v, 2) + pow(z, 2))));
-    beta = acos((pow(LENGTH_A, 2) + pow(LENGTH_B, 2) - pow(v, 2) - pow(z, 2)) / (2 * LENGTH_A * LENGTH_B));
+    v = w - length_c;
+    alpha = atan2(z, v) + acos((pow(length_a, 2) - pow(length_b, 2) + pow(v, 2) + pow(z, 2)) / 2 / length_a / sqrt(pow(v, 2) + pow(z, 2)));
+    beta = acos((pow(length_a, 2) + pow(length_b, 2) - pow(v, 2) - pow(z, 2)) / 2 / length_a / length_b);
     gamma = (w >= 0) ? atan2(y, x) : atan2(-y, -x);
 
-    alpha = alpha / PI * 180.0f;
-    beta = beta / PI * 180.0f;
-    gamma = gamma / PI * 180.0f;
+    alpha = alpha / pi * 180.0f;
+    beta = beta / pi * 180.0f;
+    gamma = gamma / pi * 180.0f;
 }
 
+// Map polar angles to servos
 void polar_to_servo(int leg, float alpha, float beta, float gamma) {
-    float a = alpha;
-    float b = beta;
-    float g = gamma;
-
-    if (leg == 0) { // FR
-        a = 90.0f - alpha;
-        b = beta;
-        g += 90.0f;
-    } else if (leg == 1) { // RR
-        a += 90.0f;
-        b = 180.0f - beta;
-        g = 90.0f - gamma;
-    } else if (leg == 2) { // FL
-        a += 90.0f;
-        b = 180.0f - beta;
-        g = 90.0f - gamma;
-    } else if (leg == 3) { // RL
-        a = 90.0f - alpha;
-        b = beta;
-        g += 90.0f;
+    if (leg == 0) {
+        alpha = 90.0f - alpha;
+        beta = beta;
+        gamma += 90.0f;
+    } else if (leg == 1) {
+        alpha += 90.0f;
+        beta = 180.0f - beta;
+        gamma = 90.0f - gamma;
+    } else if (leg == 2) {
+        alpha += 90.0f;
+        beta = 180.0f - beta;
+        gamma = 90.0f - gamma;
+    } else if (leg == 3) {
+        alpha = 90.0f - alpha;
+        beta = beta;
+        gamma += 90.0f;
     }
 
-    int angFemur = constrain((int)round(a), 0, 180);
-    int angTibia = constrain((int)round(b), 0, 180);
-    int angCoxa  = constrain((int)round(g), 0, 180);
+    int a = constrain((int)round(alpha), 0, 180);
+    int b = constrain((int)round(beta), 0, 180);
+    int g = constrain((int)round(gamma), 0, 180);
 
-    // Update global angles for telemetry & visualizer
-    // Index map: 0: Coxa, 1: Femur, 2: Tibia
-    currentAngles[leg][0] = angCoxa;
-    currentAngles[leg][1] = angFemur;
-    currentAngles[leg][2] = angTibia;
+    // Joint 0: Coxa (g), Joint 1: Femur (a), Joint 2: Tibia (b)
+    currentAngles[leg][0] = g;
+    currentAngles[leg][1] = a;
+    currentAngles[leg][2] = b;
 
     if (pcaReady) {
-        setServoAngle(KIN_SERVO_CH[leg][0], angFemur);
-        setServoAngle(KIN_SERVO_CH[leg][1], angTibia);
-        setServoAngle(KIN_SERVO_CH[leg][2], angCoxa);
+        setServoAngle(SERVO_CHANNELS[leg][0], g); // Coxa
+        setServoAngle(SERVO_CHANNELS[leg][1], a); // Femur
+        setServoAngle(SERVO_CHANNELS[leg][2], b); // Tibia
     }
 }
 
@@ -338,10 +373,10 @@ void wait_all_reach() {
 }
 
 bool is_stand() {
-    return (fabs(site_now[0][2] - Z_DEFAULT) < 2.0f);
+    return (fabs(site_now[0][2] - z_default) < 2.0f);
 }
 
-// 50Hz FreeRTOS Kinematics Task
+// 50Hz FreeRTOS Kinematics Task (replaces Arduino FlexiTimer2)
 void kinematicsTask(void* parameter) {
     const TickType_t xFrequency = pdMS_TO_TICKS(20); // 20ms = 50Hz
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -349,92 +384,96 @@ void kinematicsTask(void* parameter) {
     float alpha, beta, gamma;
 
     for (;;) {
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 3; j++) {
-                if (fabs(site_now[i][j] - site_expect[i][j]) >= fabs(temp_speed[i][j])) {
-                    site_now[i][j] += temp_speed[i][j];
-                } else {
-                    site_now[i][j] = site_expect[i][j];
+        if (kinematicsActive) {
+            for (int i = 0; i < 4; i++) {
+                for (int j = 0; j < 3; j++) {
+                    if (fabs(site_now[i][j] - site_expect[i][j]) >= fabs(temp_speed[i][j])) {
+                        site_now[i][j] += temp_speed[i][j];
+                    } else {
+                        site_now[i][j] = site_expect[i][j];
+                    }
                 }
+                cartesian_to_polar(alpha, beta, gamma, site_now[i][0], site_now[i][1], site_now[i][2]);
+                polar_to_servo(i, alpha, beta, gamma);
             }
-            cartesian_to_polar(alpha, beta, gamma, site_now[i][0], site_now[i][1], site_now[i][2]);
-            polar_to_servo(i, alpha, beta, gamma);
+            rest_counter = rest_counter + 1;
         }
-        rest_counter = rest_counter + 1;
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
 // ==========================================
-// Gait Motion Routines
+// Exact Original Gait Routines
 // ==========================================
 void sit() {
-    move_speed = STAND_SEAT_SPEED;
+    move_speed = stand_seat_speed;
     currentMode = "SITTING";
     for (int leg = 0; leg < 4; leg++) {
-        set_site(leg, KEEP, KEEP, Z_BOOT);
+        set_site(leg, KEEP, KEEP, z_boot);
     }
     wait_all_reach();
     currentMode = "REST / SIT";
 }
 
 void stand() {
-    move_speed = STAND_SEAT_SPEED;
+    move_speed = stand_seat_speed;
     currentMode = "STANDING";
     for (int leg = 0; leg < 4; leg++) {
-        set_site(leg, KEEP, KEEP, Z_DEFAULT);
+        set_site(leg, KEEP, KEEP, z_default);
     }
     wait_all_reach();
     currentMode = "STAND";
 }
 
 void step_forward(unsigned int step) {
-    move_speed = LEG_MOVE_SPEED;
+    move_speed = leg_move_speed;
     currentMode = "FORWARD";
     while (step-- > 0 && !stopRequested) {
-        if (site_now[2][1] == Y_START) {
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+        if (site_now[2][1] == y_start) {
+            // leg 2&1 move
+            set_site(2, x_default + x_offset, y_start, z_up);
             wait_all_reach();
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            wait_all_reach();
-
-            move_speed = BODY_MOVE_SPEED;
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_default);
             wait_all_reach();
 
-            move_speed = LEG_MOVE_SPEED;
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            move_speed = body_move_speed;
+            set_site(0, x_default + x_offset, y_start, z_default);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(2, x_default - x_offset, y_start + y_step, z_default);
+            set_site(3, x_default - x_offset, y_start + y_step, z_default);
             wait_all_reach();
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+
+            move_speed = leg_move_speed;
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(1, x_default + x_offset, y_start, z_up);
+            wait_all_reach();
+            set_site(1, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         } else {
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            // leg 0&3 move
+            set_site(0, x_default + x_offset, y_start, z_up);
             wait_all_reach();
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            wait_all_reach();
-
-            move_speed = BODY_MOVE_SPEED;
-            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_default);
             wait_all_reach();
 
-            move_speed = LEG_MOVE_SPEED;
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            move_speed = body_move_speed;
+            set_site(0, x_default - x_offset, y_start + y_step, z_default);
+            set_site(1, x_default - x_offset, y_start + y_step, z_default);
+            set_site(2, x_default + x_offset, y_start, z_default);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_default);
             wait_all_reach();
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+
+            move_speed = leg_move_speed;
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(3, x_default + x_offset, y_start, z_up);
+            wait_all_reach();
+            set_site(3, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         }
     }
@@ -442,52 +481,54 @@ void step_forward(unsigned int step) {
 }
 
 void step_back(unsigned int step) {
-    move_speed = LEG_MOVE_SPEED;
+    move_speed = leg_move_speed;
     currentMode = "BACKWARD";
     while (step-- > 0 && !stopRequested) {
-        if (site_now[3][1] == Y_START) {
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+        if (site_now[3][1] == y_start) {
+            // leg 3&0 move
+            set_site(3, x_default + x_offset, y_start, z_up);
             wait_all_reach();
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            wait_all_reach();
-
-            move_speed = BODY_MOVE_SPEED;
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(3, x_default + x_offset, y_start + 2 * y_step, z_default);
             wait_all_reach();
 
-            move_speed = LEG_MOVE_SPEED;
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            move_speed = body_move_speed;
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(1, x_default + x_offset, y_start, z_default);
+            set_site(2, x_default - x_offset, y_start + y_step, z_default);
+            set_site(3, x_default - x_offset, y_start + y_step, z_default);
             wait_all_reach();
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+
+            move_speed = leg_move_speed;
+            set_site(0, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(0, x_default + x_offset, y_start, z_up);
+            wait_all_reach();
+            set_site(0, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         } else {
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            // leg 1&2 move
+            set_site(1, x_default + x_offset, y_start, z_up);
             wait_all_reach();
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            wait_all_reach();
-
-            move_speed = BODY_MOVE_SPEED;
-            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_DEFAULT);
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(1, x_default + x_offset, y_start + 2 * y_step, z_default);
             wait_all_reach();
 
-            move_speed = LEG_MOVE_SPEED;
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START + 2 * Y_STEP, Z_UP);
+            move_speed = body_move_speed;
+            set_site(0, x_default - x_offset, y_start + y_step, z_default);
+            set_site(1, x_default - x_offset, y_start + y_step, z_default);
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_default);
+            set_site(3, x_default + x_offset, y_start, z_default);
             wait_all_reach();
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+
+            move_speed = leg_move_speed;
+            set_site(2, x_default + x_offset, y_start + 2 * y_step, z_up);
             wait_all_reach();
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(2, x_default + x_offset, y_start, z_up);
+            wait_all_reach();
+            set_site(2, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         }
     }
@@ -495,68 +536,70 @@ void step_back(unsigned int step) {
 }
 
 void turn_left(unsigned int step) {
-    move_speed = SPOT_TURN_SPEED;
+    move_speed = spot_turn_speed;
     currentMode = "TURN LEFT";
     while (step-- > 0 && !stopRequested) {
-        if (site_now[3][1] == Y_START) {
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+        if (site_now[3][1] == y_start) {
+            // leg 3&1 move
+            set_site(3, x_default + x_offset, y_start, z_up);
             wait_all_reach();
 
-            set_site(0, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(1, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(2, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(0, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(1, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(2, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_up);
             wait_all_reach();
 
-            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(2, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(3, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(0, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(2, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(3, turn_x0 - x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_up);
             wait_all_reach();
 
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
-            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(0, x_default + x_offset, y_start, z_default);
+            set_site(1, x_default + x_offset, y_start, z_up);
+            set_site(2, x_default - x_offset, y_start + y_step, z_default);
+            set_site(3, x_default - x_offset, y_start + y_step, z_default);
             wait_all_reach();
 
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(1, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         } else {
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            // leg 0&2 move
+            set_site(0, x_default + x_offset, y_start, z_up);
             wait_all_reach();
 
-            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_UP);
-            set_site(1, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(2, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(3, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(1, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(2, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(3, turn_x1 - x_offset, turn_y1, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(1, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(3, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(0, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(1, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(3, turn_x1 + x_offset, turn_y1, z_default);
             wait_all_reach();
 
-            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_up);
             wait_all_reach();
 
-            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(0, x_default - x_offset, y_start + y_step, z_default);
+            set_site(1, x_default - x_offset, y_start + y_step, z_default);
+            set_site(2, x_default + x_offset, y_start, z_up);
+            set_site(3, x_default + x_offset, y_start, z_default);
             wait_all_reach();
 
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(2, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         }
     }
@@ -564,87 +607,90 @@ void turn_left(unsigned int step) {
 }
 
 void turn_right(unsigned int step) {
-    move_speed = SPOT_TURN_SPEED;
+    move_speed = spot_turn_speed;
     currentMode = "TURN RIGHT";
     while (step-- > 0 && !stopRequested) {
-        if (site_now[2][1] == Y_START) {
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+        if (site_now[2][1] == y_start) {
+            // leg 2&0 move
+            set_site(2, x_default + x_offset, y_start, z_up);
             wait_all_reach();
 
-            set_site(0, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(1, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_UP);
-            set_site(3, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(0, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(1, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(3, turn_x1 + x_offset, turn_y1, z_default);
             wait_all_reach();
 
-            set_site(2, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(2, turn_x0 + x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(1, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(2, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(3, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_default);
+            set_site(1, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(2, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(3, turn_x1 - x_offset, turn_y1, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(0, turn_x0 + x_offset, turn_y0, z_up);
             wait_all_reach();
 
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(2, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(3, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
+            set_site(0, x_default + x_offset, y_start, z_up);
+            set_site(1, x_default + x_offset, y_start, z_default);
+            set_site(2, x_default - x_offset, y_start + y_step, z_default);
+            set_site(3, x_default - x_offset, y_start + y_step, z_default);
             wait_all_reach();
 
-            set_site(0, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(0, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         } else {
-            set_site(1, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            // leg 1&3 move
+            set_site(1, x_default + x_offset, y_start, z_up);
             wait_all_reach();
 
-            set_site(0, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_UP);
-            set_site(2, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(3, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(0, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_up);
+            set_site(2, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(3, turn_x0 - x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(1, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(1, turn_x0 + x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(0, turn_x1 - X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(1, turn_x0 - X_OFFSET, turn_y0, Z_DEFAULT);
-            set_site(2, turn_x1 + X_OFFSET, turn_y1, Z_DEFAULT);
-            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_DEFAULT);
+            set_site(0, turn_x1 - x_offset, turn_y1, z_default);
+            set_site(1, turn_x0 - x_offset, turn_y0, z_default);
+            set_site(2, turn_x1 + x_offset, turn_y1, z_default);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_default);
             wait_all_reach();
 
-            set_site(3, turn_x0 + X_OFFSET, turn_y0, Z_UP);
+            set_site(3, turn_x0 + x_offset, turn_y0, z_up);
             wait_all_reach();
 
-            set_site(0, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(1, X_DEFAULT - X_OFFSET, Y_START + Y_STEP, Z_DEFAULT);
-            set_site(2, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_UP);
+            set_site(0, x_default - x_offset, y_start + y_step, z_default);
+            set_site(1, x_default - x_offset, y_start + y_step, z_default);
+            set_site(2, x_default + x_offset, y_start, z_default);
+            set_site(3, x_default + x_offset, y_start, z_up);
             wait_all_reach();
 
-            set_site(3, X_DEFAULT + X_OFFSET, Y_START, Z_DEFAULT);
+            set_site(3, x_default + x_offset, y_start, z_default);
             wait_all_reach();
         }
     }
     if (!stopRequested) currentMode = "STAND";
 }
 
-void body_left(int i) {
-    set_site(0, site_now[0][0] + i, KEEP, KEEP);
-    set_site(1, site_now[1][0] + i, KEEP, KEEP);
-    set_site(2, site_now[2][0] - i, KEEP, KEEP);
-    set_site(3, site_now[3][0] - i, KEEP, KEEP);
+void body_right(int i) {
+    // move body to right
+    set_site(0, site_now[0][0] + i * 20, KEEP, KEEP);
+    set_site(1, site_now[1][0] + i * 20, KEEP, KEEP);
+    set_site(2, site_now[2][0] - i * 20, KEEP, KEEP);
+    set_site(3, site_now[3][0] - i * 20, KEEP, KEEP);
     wait_all_reach();
 }
 
-void body_right(int i) {
-    set_site(0, site_now[0][0] - i, KEEP, KEEP);
-    set_site(1, site_now[1][0] - i, KEEP, KEEP);
-    set_site(2, site_now[2][0] + i, KEEP, KEEP);
-    set_site(3, site_now[3][0] + i, KEEP, KEEP);
+void body_left(int i) {
+    set_site(0, site_now[0][0] - i * 20, KEEP, KEEP);
+    set_site(1, site_now[1][0] - i * 20, KEEP, KEEP);
+    set_site(2, site_now[2][0] + i * 20, KEEP, KEEP);
+    set_site(3, site_now[3][0] + i * 20, KEEP, KEEP);
     wait_all_reach();
 }
 
@@ -652,34 +698,22 @@ void hand_wave(int i) {
     float x_tmp, y_tmp, z_tmp;
     currentMode = "HAND WAVE";
     move_speed = 1.0f;
-    if (site_now[3][1] == Y_START) {
-        body_right(15);
-        x_tmp = site_now[2][0]; y_tmp = site_now[2][1]; z_tmp = site_now[2][2];
-        move_speed = BODY_MOVE_SPEED;
+    if (is_stand()) {
+        body_right(1);
+        x_tmp = site_now[2][0];
+        y_tmp = site_now[2][1];
+        z_tmp = site_now[2][2];
+        move_speed = 20.0f;
         for (int j = 0; j < i && !stopRequested; j++) {
             set_site(2, turn_x1, turn_y1, 50);
             wait_all_reach();
-            set_site(2, turn_x0, turn_y0, 50);
+            set_site(2, turn_x1, turn_y1, -10);
             wait_all_reach();
         }
+        move_speed = 1.0f;
         set_site(2, x_tmp, y_tmp, z_tmp);
         wait_all_reach();
-        move_speed = 1.0f;
-        body_left(15);
-    } else {
-        body_left(15);
-        x_tmp = site_now[0][0]; y_tmp = site_now[0][1]; z_tmp = site_now[0][2];
-        move_speed = BODY_MOVE_SPEED;
-        for (int j = 0; j < i && !stopRequested; j++) {
-            set_site(0, turn_x1, turn_y1, 50);
-            wait_all_reach();
-            set_site(0, turn_x0, turn_y0, 50);
-            wait_all_reach();
-        }
-        set_site(0, x_tmp, y_tmp, z_tmp);
-        wait_all_reach();
-        move_speed = 1.0f;
-        body_right(15);
+        body_left(1);
     }
     if (!stopRequested) currentMode = "STAND";
 }
@@ -688,34 +722,22 @@ void hand_shake(int i) {
     float x_tmp, y_tmp, z_tmp;
     currentMode = "HAND SHAKE";
     move_speed = 1.0f;
-    if (site_now[3][1] == Y_START) {
-        body_right(15);
-        x_tmp = site_now[2][0]; y_tmp = site_now[2][1]; z_tmp = site_now[2][2];
-        move_speed = BODY_MOVE_SPEED;
+    if (is_stand()) {
+        body_right(1);
+        x_tmp = site_now[2][0];
+        y_tmp = site_now[2][1];
+        z_tmp = site_now[2][2];
+        move_speed = 10.0f;
         for (int j = 0; j < i && !stopRequested; j++) {
-            set_site(2, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 55);
+            set_site(2, x_default - 30, y_start + 2 * y_step, 55);
             wait_all_reach();
-            set_site(2, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 10);
+            set_site(2, x_default - 30, y_start + 2 * y_step, 10);
             wait_all_reach();
         }
+        move_speed = 1.0f;
         set_site(2, x_tmp, y_tmp, z_tmp);
         wait_all_reach();
-        move_speed = 1.0f;
-        body_left(15);
-    } else {
-        body_left(15);
-        x_tmp = site_now[0][0]; y_tmp = site_now[0][1]; z_tmp = site_now[0][2];
-        move_speed = BODY_MOVE_SPEED;
-        for (int j = 0; j < i && !stopRequested; j++) {
-            set_site(0, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 55);
-            wait_all_reach();
-            set_site(0, X_DEFAULT - 30, Y_START + 2 * Y_STEP, 10);
-            wait_all_reach();
-        }
-        set_site(0, x_tmp, y_tmp, z_tmp);
-        wait_all_reach();
-        move_speed = 1.0f;
-        body_right(15);
+        body_left(1);
     }
     if (!stopRequested) currentMode = "STAND";
 }
@@ -733,12 +755,20 @@ void actionTask(void* parameter) {
     ActionRequest req;
     for (;;) {
         if (xQueueReceive(actionQueue, &req, portMAX_DELAY) == pdTRUE) {
+            String act = String(req.action);
+            if (act == "stop") {
+                stopRequested = true;
+                currentMode = "STOPPED";
+                continue;
+            }
+
+            // Enable kinematics solver during active locomotion / gestures
+            kinematicsActive = true;
             isActionRunning = true;
             stopRequested = false;
             speed_multiple = req.speed > 0 ? req.speed : 1.0f;
-            String act = String(req.action);
 
-            Serial.printf("[ACTION] Starting '%s' (%d steps, %.1fx speed)\n", act.c_str(), req.steps, speed_multiple);
+            Serial.printf("[ACTION] '%s' (%d steps, %.1fx)\n", act.c_str(), req.steps, speed_multiple);
 
             if (act == "forward") {
                 if (!is_stand()) stand();
@@ -762,13 +792,9 @@ void actionTask(void* parameter) {
             } else if (act == "hand_wave" || act == "wave") {
                 if (!is_stand()) stand();
                 hand_wave(req.steps);
-            } else if (act == "stop") {
-                stopRequested = true;
-                currentMode = "STOPPED";
             }
 
             isActionRunning = false;
-            Serial.printf("[ACTION] Finished '%s'\n", act.c_str());
         }
     }
 }
@@ -790,7 +816,6 @@ void executeAction(const String& act, int steps, float spd) {
 // ==========================================
 // Serial Command Interface (Nano Bluetooth backwards compatibility)
 // ==========================================
-// Format: "w <action_mode> <steps>"
 // w 0 1: stand | w 0 0: sit | w 1 x: fwd | w 2 x: back | w 3 x: right | w 4 x: left | w 5 x: shake | w 6 x: wave
 void parseSerialCommand(const String& cmd) {
     String trimmed = cmd;
@@ -1000,6 +1025,8 @@ void handleSetServo() {
         return;
     }
 
+    // Disable kinematics so manual slider is directly set
+    kinematicsActive = false;
     currentAngles[leg][joint] = constrain(angle, 0, 180);
     servoEnabled[leg][joint] = true;
     setServoAngle(SERVO_CHANNELS[leg][joint], currentAngles[leg][joint]);
@@ -1027,15 +1054,8 @@ void handlePower() {
 
 void handleInit() {
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    for (int l = 0; l < NUM_LEGS; l++) {
-        for (int j = 0; j < SERVOS_PER_LEG; j++) {
-            currentAngles[l][j] = DEFAULT_CALIBRATION_ANGLE;
-            servoEnabled[l][j] = true;
-            setServoAngle(SERVO_CHANNELS[l][j], 90);
-        }
-    }
-    currentMode = "ALL @ 90deg";
-    playReadyChime();
+    String type = server.hasArg("type") ? server.arg("type") : "all";
+    calibrateAllServos(type == "wave");
     handleStatus();
 }
 
@@ -1052,6 +1072,11 @@ String escapeJsonStr(const String& s) {
         char c = s[i];
         if (c == '"') res += "\\\"";
         else if (c == '\\') res += "\\\\";
+        else if (c == '\b') res += "\\b";
+        else if (c == '\f') res += "\\f";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else if (c == '\t') res += "\\t";
         else res += c;
     }
     return res;
@@ -1157,7 +1182,7 @@ void setup() {
 
     initBuzzer();
     initAntenna();
-    initKinematics();
+    initKinematicsSites();
 
     // Preferences: Wi-Fi
     preferences.begin("ark_wifi", false);
@@ -1234,6 +1259,9 @@ void setup() {
         pwm.setPWMFreq(SERVO_FREQ);
         pcaReady = true;
         Serial.println(F("[OK] PCA9685 Driver initialized (0x40)"));
+        delay(300);
+        // Start calibrated to 90 degrees neutral position
+        calibrateAllServos(true);
     } else {
         pcaReady = false;
         Serial.println(F("[FAIL] PCA9685 NOT found!"));
@@ -1263,10 +1291,7 @@ void setup() {
         0
     );
 
-    // Initial Stand
-    delay(500);
-    executeAction("stand", 1, 1.0f);
-    Serial.println(F("[OK] ARK-BOT System Ready."));
+    Serial.println(F("[OK] ARK-BOT System Ready in Neutral 90 deg Calibrated Stance."));
 }
 
 void loop() {

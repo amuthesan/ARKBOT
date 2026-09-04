@@ -481,10 +481,10 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       const tibiaLen = 52;
 
       const legMounts = [
-        { sideX: 1, frontY: -1, name: "FR" },
-        { sideX: -1, frontY: -1, name: "FL" },
-        { sideX: 1, frontY: 1, name: "RR" },
-        { sideX: -1, frontY: 1, name: "RL" }
+        { sideX: 1, frontY: -1, name: "FR" },  // Leg 0: Front-Right
+        { sideX: 1, frontY: 1, name: "RR" },   // Leg 1: Rear-Right
+        { sideX: -1, frontY: -1, name: "FL" }, // Leg 2: Front-Left
+        { sideX: -1, frontY: 1, name: "RL" }   // Leg 3: Rear-Left
       ];
 
       function projectPoint(x, y, z) {
@@ -778,14 +778,14 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
   <div id="toast">Command Sent</div>
 
   <script>
-    const LEGS = ["Front-Right (FR)", "Front-Left (FL)", "Rear-Right (RR)", "Rear-Left (RL)"];
-    const SHORT_LEGS = ["FR", "FL", "RR", "RL"];
+    const LEGS = ["Front-Right (FR)", "Rear-Right (RR)", "Front-Left (FL)", "Rear-Left (RL)"];
+    const SHORT_LEGS = ["FR", "RR", "FL", "RL"];
     const JOINTS = ["Coxa (Hip)", "Femur (Thigh)", "Tibia (Calf)"];
     const CHANNELS = [
       [4, 2, 3],
-      [10, 8, 9],
       [7, 5, 6],
-      [12, 11, 13]
+      [10, 8, 9],
+      [13, 11, 12]
     ];
     
     let servoPower = Array(4).fill().map(() => Array(3).fill(true));
