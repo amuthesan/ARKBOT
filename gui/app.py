@@ -26,7 +26,7 @@ CYBER_QSS = """
 QMainWindow, QWidget {
     background-color: #080c14;
     color: #e2e8f0;
-    font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    font-family: "Helvetica Neue", Arial;
     font-size: 13px;
 }
 
