@@ -959,6 +959,18 @@ void handleStatus() {
     }
     json += "],";
 
+    // Real-time Cartesian site coordinates
+    json += "\"sites\":[";
+    for (int l = 0; l < NUM_LEGS; l++) {
+        json += "[";
+        json += String(site_now[l][0], 1) + ",";
+        json += String(site_now[l][1], 1) + ",";
+        json += String(site_now[l][2], 1);
+        json += "]";
+        if (l < NUM_LEGS - 1) json += ",";
+    }
+    json += "],";
+
     // Power matrix
     json += "\"enabled\":[";
     for (int l = 0; l < NUM_LEGS; l++) {

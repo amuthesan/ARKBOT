@@ -299,7 +299,6 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       <div class="footer-brand">
         <span class="footer-dot"></span>
         <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.0</span>
-      </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
       </div>
@@ -314,9 +313,24 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     let currentSpeedMult = 1.0;
     let viewMode = 'iso';
     let isExecuting = false;
+    let pollInterval = 300;
+    let pollTimer = null;
+
+    // Real-time Cartesian Sites [x, y, z] for 4 legs: 0:FR, 1:RR, 2:FL, 3:RL
+    let targetSites = [
+      [124, 80, -56],  // Leg 0 (FR)
+      [124, 80, -56],  // Leg 1 (RR)
+      [124, 0, -56],   // Leg 2 (FL)
+      [124, 0, -56]    // Leg 3 (RL)
+    ];
+    let currentSimSites = [
+      [124, 80, -56],
+      [124, 80, -56],
+      [124, 0, -56],
+      [124, 0, -56]
+    ];
     let targetAngles = Array(4).fill().map(() => Array(3).fill(90));
     let currentSimAngles = Array(4).fill().map(() => Array(3).fill(90));
-    let waveAnimPhase = 0;
 
     const botLogoImg = new Image();
     botLogoImg.src = ")rawliteral" ARK_LOGO_SRC R"rawliteral(";
@@ -357,9 +371,12 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       }
       if (actionText) actionText.innerText = `Action: ${act.toUpperCase()}`;
 
+      setFastPolling(true);
+
       try {
         const res = await fetch(`/api/action?action=${act}&steps=${stepArg}&speed=${currentSpeedMult}`, { method: 'POST' });
         const data = await res.json();
+        if (data.sites) updateSites(data.sites);
         if (data.angles) updateAngles(data.angles);
       } catch (err) {
         console.error("Action error", err);
@@ -396,25 +413,51 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
+        if (data.sites) updateSites(data.sites);
         if (data.angles) updateAngles(data.angles);
         if (data.extAntenna !== undefined) updateAntennaUI(data.extAntenna, data.rssi);
 
         const botStatus = document.getElementById('botStatus');
         const actionText = document.getElementById('activeActionText');
+        const simPoseText = document.getElementById('simPoseText');
+
         if (botStatus) {
           if (data.moving) {
             botStatus.className = 'badge badge-busy';
             botStatus.innerText = 'STATUS: MOVING';
+            setFastPolling(true);
           } else {
             botStatus.className = 'badge badge-online';
             botStatus.innerText = 'STATUS: READY';
+            setFastPolling(false);
           }
         }
         if (actionText && data.mode) {
           actionText.innerText = `Mode: ${data.mode}`;
         }
-      } catch (err) {
-        console.error("Fetch status error", err);
+        if (simPoseText && data.sites) {
+          const z0 = Math.round(data.sites[0][2]);
+          simPoseText.innerText = `Pose: ${data.mode || 'ACTIVE'} (Z ≈ ${z0} mm)`;
+        }
+      } catch (err) {}
+    }
+
+    function setFastPolling(fast) {
+      const targetInt = fast ? 90 : 350;
+      if (pollInterval !== targetInt) {
+        pollInterval = targetInt;
+        clearInterval(pollTimer);
+        pollTimer = setInterval(fetchStatus, pollInterval);
+      }
+    }
+
+    function updateSites(sites) {
+      for (let l = 0; l < 4; l++) {
+        if (sites[l]) {
+          targetSites[l][0] = sites[l][0];
+          targetSites[l][1] = sites[l][1];
+          targetSites[l][2] = sites[l][2];
+        }
       }
     }
 
@@ -446,21 +489,56 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
+    // Physical dimensions & scaling
+    const S = 0.38; // Coordinate Scale Factor (mm -> canvas pixels)
+    const Lc = 72.5 * S;  // Coxa  (~27.5 px)
+    const La = 84.0 * S;  // Femur (~31.9 px)
+    const Lb = 145.0 * S; // Tibia (~55.1 px)
+    const bodyHalfW = 34; // Body X half-width
+    const bodyHalfL = 46; // Body Y half-length
+
+    // Leg mount definitions matching exact Nano hardware layout:
+    // 0: Front-Right, 1: Rear-Right, 2: Front-Left, 3: Rear-Left
+    const legMounts = [
+      { sideX: 1, frontY: -1, name: "FR" },  // Leg 0: Front-Right
+      { sideX: 1, frontY: 1,  name: "RR" },  // Leg 1: Rear-Right
+      { sideX: -1, frontY: -1, name: "FL" }, // Leg 2: Front-Left
+      { sideX: -1, frontY: 1,  name: "RL" }  // Leg 3: Rear-Left
+    ];
+
     function renderKinematics() {
       const w = canvas.parentElement.clientWidth;
       const h = canvas.parentElement.clientHeight;
       ctx.clearRect(0, 0, w, h);
 
-      waveAnimPhase += 0.04;
-
+      // Smooth interpolation toward target sites & angles
       for (let l = 0; l < 4; l++) {
-        for (let j = 0; j < 3; j++) {
-          currentSimAngles[l][j] += (targetAngles[l][j] - currentSimAngles[l][j]) * 0.25;
+        for (let k = 0; k < 3; k++) {
+          currentSimSites[l][k] += (targetSites[l][k] - currentSimSites[l][k]) * 0.32;
+          currentSimAngles[l][k] += (targetAngles[l][k] - currentSimAngles[l][k]) * 0.32;
         }
       }
 
       const cx = w / 2;
       const cy = h / 2 + (viewMode === 'side' ? 20 : 0);
+
+      // Dynamic Body Elevation from average stance height
+      const avgZ = (currentSimSites[0][2] + currentSimSites[1][2] + currentSimSites[2][2] + currentSimSites[3][2]) / 4;
+      const bodyElevZ = -avgZ * S * 0.75; // Elevate body above floor
+
+      // 3D Point Projection Helper
+      function projectPoint(x, y, z) {
+        if (viewMode === 'top') {
+          return { x: cx + x * 1.55, y: cy + y * 1.55 };
+        }
+        if (viewMode === 'side') {
+          return { x: cx + y * 1.7, y: cy - z * 1.5 };
+        }
+        // 3D Isometric Projection
+        const isoX = (x - y) * Math.cos(Math.PI / 6);
+        const isoY = (x + y) * Math.sin(Math.PI / 6) - z;
+        return { x: cx + isoX * 1.28, y: cy + isoY * 1.28 + 12 };
+      }
 
       // Floor Grid
       ctx.strokeStyle = "rgba(0, 240, 255, 0.05)";
@@ -473,100 +551,146 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
       }
 
-      const bodyHalfW = 44;
-      const bodyHalfL = 60;
-      const bodyElevZ = 30;
-      const coxaLen = 22;
-      const femurLen = 42;
-      const tibiaLen = 52;
+      // Compute 3D coordinates for all 4 legs using Exact Forward Kinematics
+      const legPoints = [];
+      for (let l = 0; l < 4; l++) {
+        const [x_mm, y_mm, z_mm] = currentSimSites[l];
+        const m = legMounts[l];
 
-      const legMounts = [
-        { sideX: 1, frontY: -1, name: "FR" },  // Leg 0: Front-Right
-        { sideX: 1, frontY: 1, name: "RR" },   // Leg 1: Rear-Right
-        { sideX: -1, frontY: -1, name: "FL" }, // Leg 2: Front-Left
-        { sideX: -1, frontY: 1, name: "RL" }   // Leg 3: Rear-Left
-      ];
-
-      function projectPoint(x, y, z) {
-        if (viewMode === 'top') return { x: cx + x * 1.5, y: cy + y * 1.5 };
-        if (viewMode === 'side') return { x: cx + y * 1.7, y: cy - z * 1.5 };
-        const isoX = (x - y) * Math.cos(Math.PI / 6);
-        const isoY = (x + y) * Math.sin(Math.PI / 6) - z;
-        return { x: cx + isoX * 1.25, y: cy + isoY * 1.25 + 10 };
-      }
-
-      // Ground Shadow
-      ctx.beginPath();
-      legMounts.forEach((m, i) => {
-        const p = projectPoint(m.sideX * (bodyHalfW + coxaLen + 15), m.frontY * (bodyHalfL + 15), -35);
-        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-      });
-      ctx.closePath();
-      ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-      ctx.fill();
-
-      // Render Legs
-      legMounts.forEach((m, l) => {
-        const coxaAng = (currentSimAngles[l][0] - 90) * (Math.PI / 180);
-        const femurAng = (currentSimAngles[l][1] - 90) * (Math.PI / 180);
-        const tibiaAng = (currentSimAngles[l][2] - 90) * (Math.PI / 180);
-
+        // 1. Hip Mount Origin on Body Chassis
         const hipX = m.sideX * bodyHalfW;
         const hipY = m.frontY * bodyHalfL;
         const hipZ = bodyElevZ;
 
-        const baseHeading = (m.sideX > 0) ? 0 : Math.PI;
-        const coxaTheta = baseHeading + (m.sideX * coxaAng * 0.7);
+        // 2. Exact Inverse-to-Forward Trigonometry (Nano Exact Kinematics Math)
+        const w_mm = Math.sqrt(x_mm * x_mm + y_mm * y_mm);
+        const v_mm = w_mm - 72.5; // distance beyond Coxa
+        const gamma = (w_mm >= 0) ? Math.atan2(y_mm, x_mm) : Math.atan2(-y_mm, -x_mm);
 
-        const kneeX = hipX + Math.cos(coxaTheta) * coxaLen;
-        const kneeY = hipY + Math.sin(coxaTheta) * coxaLen;
-        const kneeZ = hipZ;
+        const v_px = v_mm * S;
+        const z_px = z_mm * S;
+        const L_px = Math.sqrt(v_px * v_px + z_px * z_px);
+        const ang0 = Math.atan2(z_px, Math.max(0.01, v_px));
+        let cosA = (La * La - Lb * Lb + L_px * L_px) / (2 * La * Math.max(0.01, L_px));
+        cosA = Math.max(-1, Math.min(1, cosA));
+        const alpha = ang0 + Math.acos(cosA);
 
-        const fAng = -femurAng - 0.4;
-        const ankleX = kneeX + Math.cos(coxaTheta) * (Math.cos(fAng) * femurLen);
-        const ankleY = kneeY + Math.sin(coxaTheta) * (Math.cos(fAng) * femurLen);
-        const ankleZ = kneeZ + Math.sin(fAng) * femurLen;
+        // 3. 3D Joint Locations
+        // Coxa Joint (end of coxa horn):
+        const coxaX = hipX + m.sideX * (Lc * Math.cos(gamma));
+        const coxaY = hipY - (Lc * Math.sin(gamma));
+        const coxaZ = hipZ;
 
-        const tAng = fAng - tibiaAng - 0.9;
-        const footX = ankleX + Math.cos(coxaTheta) * (Math.cos(tAng) * tibiaLen);
-        const footY = ankleY + Math.sin(coxaTheta) * (Math.cos(tAng) * tibiaLen);
-        const footZ = ankleZ + Math.sin(tAng) * tibiaLen;
+        // Knee Joint (end of femur link):
+        const kneeX = coxaX + m.sideX * (La * Math.cos(alpha) * Math.cos(gamma));
+        const kneeY = coxaY - (La * Math.cos(alpha) * Math.sin(gamma));
+        const kneeZ = coxaZ + (La * Math.sin(alpha));
 
-        const p0 = projectPoint(hipX, hipY, hipZ);
-        const p1 = projectPoint(kneeX, kneeY, kneeZ);
-        const p2 = projectPoint(ankleX, ankleY, ankleZ);
-        const p3 = projectPoint(footX, footY, footZ);
+        // Foot Ground Contact Pad:
+        const footX = hipX + m.sideX * (x_mm * S);
+        const footY = hipY - ((y_mm - 40) * S);
+        const footZ = hipZ + (z_mm * S);
 
-        ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y);
-        ctx.strokeStyle = "#00f0ff"; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.stroke();
+        legPoints.push({
+          p0: projectPoint(hipX, hipY, hipZ),
+          p1: projectPoint(coxaX, coxaY, coxaZ),
+          p2: projectPoint(kneeX, kneeY, kneeZ),
+          p3: projectPoint(footX, footY, footZ),
+          footZ: footZ,
+          mount: m
+        });
+      }
 
-        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-        ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 4; ctx.stroke();
+      // Ground Shadows under feet
+      legPoints.forEach(leg => {
+        const shadowP = projectPoint(
+          leg.mount.sideX * bodyHalfW + leg.mount.sideX * (currentSimSites[leg.mount.name === "FR" ? 0 : 1][0] * S),
+          leg.mount.frontY * bodyHalfL - ((currentSimSites[0][1] - 40) * S),
+          -10
+        );
+        ctx.beginPath();
+        ctx.ellipse(leg.p3.x, leg.p3.y + 12, 10, 5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+        ctx.fill();
+      });
 
-        ctx.beginPath(); ctx.moveTo(p2.x, p2.y); ctx.lineTo(p3.x, p3.y);
-        ctx.strokeStyle = "#00f0ff"; ctx.lineWidth = 3; ctx.stroke();
+      // Render 4 Quadruped Limbs
+      legPoints.forEach((leg, l) => {
+        // Link 1: Hip to Coxa (Cyan Rod)
+        ctx.beginPath();
+        ctx.moveTo(leg.p0.x, leg.p0.y);
+        ctx.lineTo(leg.p1.x, leg.p1.y);
+        ctx.strokeStyle = "#00f0ff";
+        ctx.lineWidth = 5;
+        ctx.lineCap = "round";
+        ctx.stroke();
 
-        // Foot pad
-        ctx.beginPath(); ctx.arc(p3.x, p3.y, 6, 0, Math.PI * 2);
-        ctx.fillStyle = "#10b981"; ctx.shadowColor = "rgba(16,185,129,0.8)"; ctx.shadowBlur = 10; ctx.fill(); ctx.shadowBlur = 0;
+        // Hip & Coxa Joint Spheres
+        ctx.beginPath(); ctx.arc(leg.p0.x, leg.p0.y, 4, 0, Math.PI * 2); ctx.fillStyle = "#38bdf8"; ctx.fill();
+        ctx.beginPath(); ctx.arc(leg.p1.x, leg.p1.y, 4, 0, Math.PI * 2); ctx.fillStyle = "#0284c7"; ctx.fill();
+
+        // Link 2: Femur Thigh (Deep Cyber Blue)
+        ctx.beginPath();
+        ctx.moveTo(leg.p1.x, leg.p1.y);
+        ctx.lineTo(leg.p2.x, leg.p2.y);
+        ctx.strokeStyle = "#3b82f6";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // Knee Joint Sphere
+        ctx.beginPath(); ctx.arc(leg.p2.x, leg.p2.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#60a5fa";
+        ctx.fill();
+
+        // Link 3: Tibia Calf (Bright Neon Cyan)
+        ctx.beginPath();
+        ctx.moveTo(leg.p2.x, leg.p2.y);
+        ctx.lineTo(leg.p3.x, leg.p3.y);
+        ctx.strokeStyle = "#00f0ff";
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+
+        // Glowing Foot Tip
+        ctx.beginPath();
+        ctx.arc(leg.p3.x, leg.p3.y, 5.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#10b981";
+        ctx.shadowColor = "rgba(16, 185, 129, 0.9)";
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
       });
 
       // Chassis Body Shell
-      const c_fl = projectPoint(-bodyHalfW, -bodyHalfL, bodyElevZ + 10);
-      const c_fr = projectPoint(bodyHalfW, -bodyHalfL, bodyElevZ + 10);
-      const c_rr = projectPoint(bodyHalfW, bodyHalfL, bodyElevZ + 10);
-      const c_rl = projectPoint(-bodyHalfW, bodyHalfL, bodyElevZ + 10);
+      const c_fr = projectPoint(bodyHalfW, -bodyHalfL, bodyElevZ + 8);
+      const c_rr = projectPoint(bodyHalfW, bodyHalfL, bodyElevZ + 8);
+      const c_rl = projectPoint(-bodyHalfW, bodyHalfL, bodyElevZ + 8);
+      const c_fl = projectPoint(-bodyHalfW, -bodyHalfL, bodyElevZ + 8);
 
       ctx.save();
       ctx.beginPath();
-      ctx.moveTo(c_fl.x, c_fl.y); ctx.lineTo(c_fr.x, c_fr.y); ctx.lineTo(c_rr.x, c_rr.y); ctx.lineTo(c_rl.x, c_rl.y);
+      ctx.moveTo(c_fl.x, c_fl.y);
+      ctx.lineTo(c_fr.x, c_fr.y);
+      ctx.lineTo(c_rr.x, c_rr.y);
+      ctx.lineTo(c_rl.x, c_rl.y);
       ctx.closePath();
-      ctx.fillStyle = "#141e33"; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = "#334155"; ctx.stroke();
+      
+      const bodyGrad = ctx.createLinearGradient(c_fl.x, c_fl.y, c_rr.x, c_rr.y);
+      bodyGrad.addColorStop(0, "#1e293b");
+      bodyGrad.addColorStop(0.5, "#0f172a");
+      bodyGrad.addColorStop(1, "#1e293b");
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(0, 240, 255, 0.6)";
+      ctx.shadowColor = "rgba(0, 240, 255, 0.4)";
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
 
-      const coreP = projectPoint(0, 0, bodyElevZ + 10);
+      // Chassis Center Core Logo
+      const coreP = projectPoint(0, 0, bodyElevZ + 8);
       if (botLogoImg.complete && botLogoImg.naturalWidth > 0) {
-        const sz = 34;
+        const sz = 32;
         ctx.drawImage(botLogoImg, coreP.x - sz/2, coreP.y - sz/2, sz, sz);
       }
       ctx.restore();
@@ -575,7 +699,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     }
 
     fetchStatus();
-    setInterval(fetchStatus, 1500);
+    pollTimer = setInterval(fetchStatus, pollInterval);
     requestAnimationFrame(renderKinematics);
   </script>
 </body>
