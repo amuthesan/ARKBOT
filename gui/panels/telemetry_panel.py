@@ -40,12 +40,14 @@ class TelemetryPanel(QWidget):
         self.lbl_pca = QLabel("PCA9685: Checking...")
         self.lbl_mode = QLabel("Mode: STAND")
         self.lbl_packets = QLabel("Packets: 0")
+        self.lbl_vbat = QLabel("Battery: -- V")
 
         diag_layout.addWidget(self.lbl_robot, 0, 0)
         diag_layout.addWidget(self.lbl_ver, 0, 1)
         diag_layout.addWidget(self.lbl_pca, 0, 2)
         diag_layout.addWidget(self.lbl_mode, 1, 0)
         diag_layout.addWidget(self.lbl_packets, 1, 1)
+        diag_layout.addWidget(self.lbl_vbat, 1, 2)
 
         main_layout.addWidget(diag_group)
 
@@ -130,6 +132,20 @@ class TelemetryPanel(QWidget):
             ready = bool(telem["pca"])
             self.lbl_pca.setText("PCA9685: READY" if ready else "PCA9685: OFFLINE")
             self.lbl_pca.setStyleSheet("color: #10b981;" if ready else "color: #ef4444; font-weight: bold;")
+
+        if "vbat" in telem:
+            try:
+                vbat = float(telem["vbat"])
+                self.lbl_vbat.setText(f"Battery: {vbat:.2f} V")
+                if vbat < 6.8:
+                    self.lbl_vbat.setStyleSheet("color: #ef4444; font-weight: bold;")
+                elif vbat < 7.4:
+                    self.lbl_vbat.setStyleSheet("color: #f59e0b; font-weight: bold;")
+                else:
+                    self.lbl_vbat.setStyleSheet("color: #10b981; font-weight: bold;")
+            except (ValueError, TypeError):
+                pass
+
 
         # Update Table Sites (cols 1, 2, 3)
         if "sites" in telem and isinstance(telem["sites"], list):

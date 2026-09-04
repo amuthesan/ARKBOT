@@ -4,6 +4,22 @@ All notable changes to the **ARK-BOT** project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.5] - 2026-09-05
+
+### Added
+- **Battery Voltage Monitoring via Xiao Expansion A0 (GPIO 0)**:
+  - Integrated 12-bit ADC battery sensing across a 10kΩ / 2.2kΩ voltage divider.
+  - Implemented calibrated millivolt reading with Exponential Moving Average (EMA) filtering to smooth out servo current switching noise.
+- **Dynamic Multiplier Calibration with NVS Persistence**:
+  - Configured default calibrated ratio (`5.06586` matching $10.0\text{V} / 1.974\text{V}$).
+  - Added dedicated **Battery Voltage & Multiplier Card** on `/setup` page with live voltage readout, raw divider voltage, and one-click NVS save.
+  - Added interactive "Quick Multiplier Calculator" helper to calculate ratios automatically from a multimeter measurement.
+- **Multi-Interface Battery Telemetry & HUD**:
+  - **OLED Display**: Added 4-stage rotating HUD cycle displaying `BAT: XX.XV (X.XXV)` on the status line.
+  - **Web UI (`/`, `/calib`, `/setup`)**: Added live battery voltage indicator badge with adaptive color coding.
+  - **Python Desktop Companion GUI**: Integrated live battery indicator badge in top header and telemetry panel.
+  - **Telemetry API**: Extended `/api/status` and 20Hz Serial JSON stream with `"vbat"`, `"vdiv"`, and `"vbat_mult"`.
+
 ## [v1.0.4] - 2026-09-04
 
 ### Added

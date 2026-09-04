@@ -84,6 +84,11 @@ bool useExternalAntenna = false;
 String activeIp = "192.168.4.1";
 String currentMode = "ALL @ 90deg";
 
+// Battery Voltage Sensing & Dynamic Calibration Multiplier
+float batteryMultiplier = DEFAULT_BATTERY_MULTIPLIER;
+float batteryVoltage = 0.0f;
+float rawDividerVoltage = 0.0f;
+
 // Kinematics active flag: ONLY true when running an action (Stand, Sit, Walk, etc.)
 // When in Calibration mode, this is false so calibration 90° and sliders are NEVER overwritten!
 volatile bool kinematicsActive = false;
@@ -99,6 +104,7 @@ TaskHandle_t kinematicsTaskHandle = NULL;
 TaskHandle_t actionTaskHandle = NULL;
 
 // Forward Declarations
+void sampleBatteryVoltage();
 void playStepChime();
 void playReadyChime();
 void playBootChime();
@@ -154,6 +160,44 @@ void setAntenna(bool external, bool persist = true) {
 
     Serial.printf("[RF] Antenna: %s\n", external ? "EXTERNAL (IPEX)" : "INTERNAL (Ceramic)");
 }
+
+// ==========================================
+// Battery Voltage Sense & Calibration
+// ==========================================
+void sampleBatteryVoltage() {
+    static bool firstSample = true;
+    uint32_t rawMv = analogReadMilliVolts(BATTERY_ADC_PIN);
+    float v_div = (float)rawMv / 1000.0f;
+    float v_bat = v_div * batteryMultiplier;
+
+    if (firstSample) {
+        rawDividerVoltage = v_div;
+        batteryVoltage = v_bat;
+        firstSample = false;
+    } else {
+        // Smooth out servo switching load noise using Exponential Moving Average (EMA)
+        rawDividerVoltage = (rawDividerVoltage * 0.85f) + (v_div * 0.15f);
+        batteryVoltage = (batteryVoltage * 0.85f) + (v_bat * 0.15f);
+    }
+}
+
+void initBatterySensor() {
+    analogReadResolution(12);
+#if defined(ADC_11db)
+    analogSetAttenuation(ADC_11db);
+#endif
+    pinMode(BATTERY_ADC_PIN, INPUT);
+
+    preferences.begin("ark_cfg", false);
+    batteryMultiplier = preferences.getFloat(NVS_KEY_BAT_MULT, DEFAULT_BATTERY_MULTIPLIER);
+    preferences.end();
+    if (batteryMultiplier <= 0.01f || isnan(batteryMultiplier)) {
+        batteryMultiplier = DEFAULT_BATTERY_MULTIPLIER;
+    }
+    Serial.printf("[BAT] ADC Pin: %d | Multiplier: %.5f\n", BATTERY_ADC_PIN, batteryMultiplier);
+    sampleBatteryVoltage();
+}
+
 
 // ==========================================
 // Buzzer Audio Feedback (LEDC PWM)
@@ -923,7 +967,11 @@ void sendSerialTelemetryJson() {
         s += "]";
         if (l < NUM_LEGS - 1) s += ",";
     }
-    s += "]}";
+    s += "]";
+    s += ",\"vbat\":"; s += String(batteryVoltage, 2);
+    s += ",\"vdiv\":"; s += String(rawDividerVoltage, 3);
+    s += ",\"vbat_mult\":"; s += String(batteryMultiplier, 5);
+    s += "}";
     Serial.println(s);
 }
 
@@ -934,6 +982,21 @@ void parseSerialCommand(const String& cmd) {
 
     // 1. Structured JSON Command from Companion GUI
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        // Battery Multiplier command: {"set_bat_mult": 5.06586}
+        int batIdx = trimmed.indexOf("\"set_bat_mult\"");
+        if (batIdx >= 0) {
+            int colon = trimmed.indexOf(':', batIdx);
+            float mult = trimmed.substring(colon + 1).toFloat();
+            if (mult > 0.01f && mult < 50.0f) {
+                batteryMultiplier = mult;
+                preferences.begin("ark_cfg", false);
+                preferences.putFloat(NVS_KEY_BAT_MULT, batteryMultiplier);
+                preferences.end();
+                sampleBatteryVoltage();
+                Serial.printf("[BAT] Multiplier set via serial: %.5f (Vbat: %.2fV)\n", batteryMultiplier, batteryVoltage);
+            }
+            return;
+        }
         // Action command: {"action":"forward","steps":3,"speed":1.0}
         int actIdx = trimmed.indexOf("\"action\"");
         if (actIdx >= 0) {
@@ -1114,6 +1177,12 @@ void drawMainDashboard(bool heartbeat, int cycleIndex) {
     } else if (cycleIndex == 0) {
         display.print(F("IP: ")); display.print(activeIp);
     } else if (cycleIndex == 1) {
+        display.print(F("BAT: "));
+        display.print(batteryVoltage, 1);
+        display.print(F("V ("));
+        display.print(rawDividerVoltage, 2);
+        display.print(F("V)"));
+    } else if (cycleIndex == 2) {
         display.print(F("MD: ")); display.print(currentMode);
     } else {
         display.print(useExternalAntenna ? F("ANT:EXT ") : F("ANT:INT "));
@@ -1139,6 +1208,24 @@ void handleCalib() {
 
 void handleSetup() {
     server.send_P(200, "text/html", SETUP_HTML);
+}
+
+void handleSetBatteryMultiplier() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (server.hasArg("mult")) {
+        float mult = server.arg("mult").toFloat();
+        if (mult > 0.01f && mult < 50.0f) {
+            batteryMultiplier = mult;
+            preferences.begin("ark_cfg", false);
+            preferences.putFloat(NVS_KEY_BAT_MULT, batteryMultiplier);
+            preferences.end();
+            sampleBatteryVoltage();
+            Serial.printf("[BAT] Multiplier saved to NVS: %.5f (Vbat: %.2fV)\n", batteryMultiplier, batteryVoltage);
+            server.send(200, "application/json", "{\"status\":\"ok\",\"mult\":" + String(batteryMultiplier, 5) + ",\"vbat\":" + String(batteryVoltage, 2) + ",\"vdiv\":" + String(rawDividerVoltage, 3) + "}");
+            return;
+        }
+    }
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid multiplier\"}");
 }
 
 void handleStatus() {
@@ -1174,6 +1261,9 @@ void handleStatus() {
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
     json += "\"rssi\":" + String(cachedRssi) + ",";
+    json += "\"vbat\":" + String(batteryVoltage, 2) + ",";
+    json += "\"vdiv\":" + String(rawDividerVoltage, 3) + ",";
+    json += "\"vbat_mult\":" + String(batteryMultiplier, 5) + ",";
     
     // Angles matrix
     json += "\"angles\":[";
@@ -1513,6 +1603,7 @@ void setup() {
 
     initBuzzer();
     initAntenna();
+    initBatterySensor();
     initKinematicsSites();
 
     // Preferences: Wi-Fi
@@ -1524,7 +1615,7 @@ void setup() {
     delay(300);
     Serial.println(F("\n=========================================="));
     Serial.println(F("      ARK-BOT CYBER MOTION COMMANDER      "));
-    Serial.println(F("         Version 1.0.0 (ESP32-C6)         "));
+    Serial.printf ("             Version %s (ESP32-C6)        \n", ROBOT_VERSION);
     Serial.println(F("=========================================="));
 
     // Wi-Fi Setup
@@ -1569,6 +1660,8 @@ void setup() {
     server.on("/api/wifi/reset", HTTP_POST, handleWifiReset);
     server.on("/api/reboot", HTTP_POST, handleReboot);
     server.on("/api/antenna", HTTP_POST, handleSetAntenna);
+    server.on("/api/battery/multiplier", HTTP_POST, handleSetBatteryMultiplier);
+    server.on("/api/set_bat_mult", HTTP_POST, handleSetBatteryMultiplier);
     server.on("/api/servo", HTTP_POST, handleSetServo);
     server.on("/api/power", HTTP_POST, handlePower);
     server.on("/api/init", HTTP_POST, handleInit);
@@ -1659,6 +1752,13 @@ void loop() {
         }
     }
 
+    // Periodic Battery ADC Sample (5Hz / 200ms)
+    static unsigned long lastBatSample = 0;
+    if (millis() - lastBatSample >= 200) {
+        lastBatSample = millis();
+        sampleBatteryVoltage();
+    }
+
     // Periodic Serial JSON Telemetry Stream (20Hz / 50ms)
     static unsigned long lastSerialTelem = 0;
     if (serialTelemetryStream && (millis() - lastSerialTelem >= 50)) {
@@ -1673,7 +1773,7 @@ void loop() {
     if (millis() - lastOled >= 500) {
         lastOled = millis();
         blink = !blink;
-        cycle = (cycle + 1) % 9;
+        cycle = (cycle + 1) % 12;
         drawMainDashboard(blink, cycle / 3);
     }
 }

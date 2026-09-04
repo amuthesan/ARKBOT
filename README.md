@@ -51,6 +51,7 @@ All 12 servos connect directly to the **PCA9685 16-Channel I2C PWM Driver** usin
 | **I2C SDA** | `D4` | `GPIO 22` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
 | **I2C SCL** | `D5` | `GPIO 23` | PCA9685 (`0x40`) & OLED SSD1306 (`0x3C`) |
 | **Buzzer** | `D3` | `GPIO 21` | Passive Buzzer (Expansion Board) |
+| **Battery Sense** | `A0` | `GPIO 0` | 10kΩ / 2.2kΩ Voltage Divider Input |
 | **RF Switch Power** | — | `GPIO 3` | Onboard RF Switch Power Enable (Active LOW) |
 | **Antenna Select** | — | `GPIO 14` | LOW = Onboard Ceramic, HIGH = External U.FL/IPEX |
 
@@ -93,6 +94,7 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
  ### ⚙️ Wi-Fi & System Setup (`/setup`)
  - **Wi-Fi Scanner**: One-click 2.4GHz network scan with live signal strength meters, channel numbers, and security modes.
  - **Credential Configuration**: Quick-select network from scan results, input Wi-Fi password with show/hide toggle, and save to persistent NVS storage across reboots.
+ - **🔋 Battery Voltage & Multiplier Calibration**: Real-time battery voltage monitoring via **Xiao Expansion A0 (GPIO 0)**, live raw divider reading, customizable calibration multiplier saved to NVS, and quick automatic multiplier calculator.
  - **Telemetry Dashboard**: Live connection status, Station IP, SoftAP IP, MAC address, mDNS URL, and system uptime.
  - **Device Management**: Safely restart the ESP32-C6 controller or reset Wi-Fi configuration with automatic reconnection timer.
 

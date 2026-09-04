@@ -8,9 +8,10 @@ This directory stores compiled release binary files (`.bin`) for each version of
 
 ```
 firmware_builds/
-├── v1.0.4/
+├── v1.0.5/
 │   ├── firmware.bin          # OTA update binary (upload via http://arkbot.local/update)
 │   └── firmware.factory.bin  # Factory flashing binary (includes bootloader, partitions, and app)
+├── v1.0.4/
 ├── v1.0.3/
 ├── v1.0.1/
 └── v0.1.1/

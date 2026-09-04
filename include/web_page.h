@@ -14,7 +14,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ARK-BOT Action Commander | v1.0.4</title>
+  <title>ARK-BOT Action Commander | v1.0.5</title>
   <style>
     :root {
       --bg: #070a0f;
@@ -144,7 +144,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
       <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
       <div class="title">
         <h1>ARK-BOT</h1>
-        <p>Cyber Motion Commander (v1.0.4)</p>
+        <p>Cyber Motion Commander (v1.0.5)</p>
       </div>
     </div>
 
@@ -157,6 +157,12 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     </nav>
     
     <div class="header-right">
+      <!-- Battery Widget -->
+      <div class="rf-widget" title="Live Battery Voltage (Xiao Expansion A0)">
+        <span class="rf-label">🔋 BAT:</span>
+        <span class="rssi-badge" id="vbatPill" style="color:var(--cyan); font-weight:800;">-- V</span>
+      </div>
+
       <!-- Antenna Control -->
       <div class="rf-widget">
         <span class="rf-label">Antenna:</span>
@@ -312,7 +318,7 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
       </div>
@@ -467,6 +473,16 @@ const char COMMANDER_HTML[] PROGMEM = R"rawliteral(
         if (data.angles) updateAngles(data.angles);
         if (data.extAntenna !== undefined) updateAntennaUI(data.extAntenna, data.rssi);
         if (data.walk_height) updateWalkHeightUI(data.walk_height);
+        
+        if (data.vbat !== undefined) {
+          const vbatPill = document.getElementById('vbatPill');
+          if (vbatPill) {
+            vbatPill.innerText = `${data.vbat.toFixed(1)}V`;
+            if (data.vbat < 6.8) vbatPill.style.color = '#ef4444';
+            else if (data.vbat < 7.4) vbatPill.style.color = '#f59e0b';
+            else vbatPill.style.color = '#00f0ff';
+          }
+        }
 
         const botStatus = document.getElementById('botStatus');
         const actionText = document.getElementById('activeActionText');
@@ -915,6 +931,12 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     </nav>
     
     <div class="header-right">
+      <!-- Battery Widget -->
+      <div class="rf-widget" title="Live Battery Voltage (Xiao Expansion A0)">
+        <span class="rf-label">🔋 BAT:</span>
+        <span class="rssi-badge" id="vbatPill" style="color:var(--cyan); font-weight:800;">-- V</span>
+      </div>
+
       <div class="rf-widget">
         <span class="rf-label">Antenna:</span>
         <div class="rf-btns">
@@ -952,7 +974,7 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
@@ -1124,6 +1146,16 @@ const char CALIB_HTML[] PROGMEM = R"rawliteral(
           badge.innerText = data.pcaReady ? 'PCA: READY (0x40)' : 'PCA: OFFLINE';
         }
         if (data.extAntenna !== undefined) updateAntennaUI(data.extAntenna, data.rssi);
+
+        if (data.vbat !== undefined) {
+          const vbatPill = document.getElementById('vbatPill');
+          if (vbatPill) {
+            vbatPill.innerText = `${data.vbat.toFixed(1)}V`;
+            if (data.vbat < 6.8) vbatPill.style.color = '#ef4444';
+            else if (data.vbat < 7.4) vbatPill.style.color = '#f59e0b';
+            else vbatPill.style.color = '#00f0ff';
+          }
+        }
 
         if (data.angles) {
           for (let l = 0; l < 4; l++) {
@@ -1400,7 +1432,53 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       </form>
     </div>
 
-    <!-- Card 3: Network & System Telemetry -->
+    <!-- Card 3: Battery Voltage & Multiplier Calibration -->
+    <div class="card">
+      <div class="card-title">
+        <span>🔋 Battery Voltage & Multiplier</span>
+        <span class="badge badge-online" id="batBadge">MONITORING</span>
+      </div>
+      <p style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">
+        Monitors power supply voltage connected to <strong>Xiao Expansion Pin A0</strong> (10kΩ & 2.2kΩ divider).
+      </p>
+
+      <div class="tele-grid" style="margin-bottom:14px;">
+        <div class="tele-item" style="border-color:rgba(0,240,255,0.3);">
+          <div class="tele-label">Battery Voltage</div>
+          <div class="tele-val" id="batVoltageVal" style="color:var(--cyan); font-size:18px; font-weight:800;">-- V</div>
+        </div>
+        <div class="tele-item">
+          <div class="tele-label">Raw Divider (A0)</div>
+          <div class="tele-val" id="batDividerVal" style="color:var(--yellow); font-size:16px; font-weight:700;">-- V</div>
+        </div>
+      </div>
+
+      <form id="batForm" onsubmit="event.preventDefault(); saveBatteryMultiplier();">
+        <div class="form-group">
+          <label class="form-label" for="batMultInput">Calibration Multiplier</label>
+          <div class="input-wrap">
+            <input type="number" id="batMultInput" class="input-field" step="0.00001" min="0.01" max="50.0" value="5.06586" required>
+          </div>
+          <p style="font-size:10px; color:var(--text-dim); margin-top:4px;">
+            Default measured ratio: <code>10.0V / 1.974V = 5.06586</code>
+          </p>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:8px; border:1px solid var(--card-border); margin-bottom:12px;">
+          <div style="font-size:11px; font-weight:700; color:var(--cyan); margin-bottom:6px;">🎯 Quick Multiplier Calculator</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="actualVoltInput" class="input-field" style="padding:6px 10px; font-size:12px;" step="0.01" placeholder="e.g. 10.00 (Measured V)">
+            <button type="button" class="btn btn-dark" style="white-space:nowrap; padding:6px 12px; font-size:11px;" onclick="calculateMultiplierFromActual()">Calculate</button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-green btn-full" id="btnSaveBat">
+          💾 Save Multiplier to NVS
+        </button>
+      </form>
+    </div>
+
+    <!-- Card 4: Network & System Telemetry -->
     <div class="card">
       <div class="card-title">
         <span>📊 Connection & System Status</span>
@@ -1441,7 +1519,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       </div>
     </div>
 
-    <!-- Card 4: Device Management -->
+    <!-- Card 5: Device Management -->
     <div class="card">
       <div class="card-title">
         <span>⚡ Hardware & Power Management</span>
@@ -1477,7 +1555,7 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>
@@ -1677,6 +1755,73 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
       } catch (err) {}
     }
 
+    let currentDividerVoltage = 1.974;
+
+    async function fetchBatteryStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.vbat !== undefined) {
+          const vbatEl = document.getElementById('batVoltageVal');
+          const vdivEl = document.getElementById('batDividerVal');
+          const multInput = document.getElementById('batMultInput');
+          if (vbatEl) {
+            vbatEl.innerText = `${data.vbat.toFixed(2)} V`;
+            if (data.vbat < 6.8) vbatEl.style.color = 'var(--red)';
+            else if (data.vbat < 7.4) vbatEl.style.color = 'var(--yellow)';
+            else vbatEl.style.color = 'var(--cyan)';
+          }
+          if (vdivEl && data.vdiv !== undefined) {
+            currentDividerVoltage = data.vdiv;
+            vdivEl.innerText = `${data.vdiv.toFixed(3)} V`;
+          }
+          if (multInput && document.activeElement !== multInput && data.vbat_mult !== undefined) {
+            multInput.value = data.vbat_mult.toFixed(5);
+          }
+        }
+      } catch (err) {}
+    }
+
+    async function saveBatteryMultiplier() {
+      const mult = parseFloat(document.getElementById('batMultInput').value);
+      if (isNaN(mult) || mult <= 0) {
+        showToast("Invalid multiplier value");
+        return;
+      }
+      showToast("Saving battery multiplier to NVS...");
+      try {
+        const res = await fetch('/api/battery/multiplier', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `mult=${mult}`
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          showToast(`Saved! Multiplier: ${mult.toFixed(5)}`);
+          fetchBatteryStatus();
+        } else {
+          showToast(data.message || "Failed to save");
+        }
+      } catch (err) {
+        showToast("Error saving multiplier");
+      }
+    }
+
+    function calculateMultiplierFromActual() {
+      const actual = parseFloat(document.getElementById('actualVoltInput').value);
+      if (isNaN(actual) || actual <= 0) {
+        showToast("Please enter a valid measured battery voltage");
+        return;
+      }
+      if (currentDividerVoltage <= 0.05) {
+        showToast("Divider voltage too low to calculate");
+        return;
+      }
+      const calculatedMult = actual / currentDividerVoltage;
+      document.getElementById('batMultInput').value = calculatedMult.toFixed(5);
+      showToast(`Calculated: ${calculatedMult.toFixed(5)} (${actual}V / ${currentDividerVoltage.toFixed(3)}V)`);
+    }
+
     function showToast(msg) {
       const toast = document.getElementById('toast');
       toast.innerText = msg;
@@ -1685,7 +1830,9 @@ const char SETUP_HTML[] PROGMEM = R"rawliteral(
     }
 
     fetchWifiStatus();
+    fetchBatteryStatus();
     setInterval(fetchWifiStatus, 3000);
+    setInterval(fetchBatteryStatus, 1500);
     setTimeout(triggerScan, 400);
   </script>
 </body>
@@ -1823,7 +1970,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
       <img src=")rawliteral" ARK_LOGO_SRC R"rawliteral(" class="brand-logo" alt="ARK-BOT Logo" onclick="location.href='/'">
       <div class="title">
         <h1>ARK-BOT</h1>
-        <p>Firmware OTA Manager (v1.0.4)</p>
+        <p>Firmware OTA Manager (v1.0.5)</p>
       </div>
     </div>
 
@@ -1923,7 +2070,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
         </tr>
         <tr>
           <td>Current Version</td>
-          <td style="color:var(--cyan);">v1.0.4</td>
+          <td style="color:var(--cyan);">v1.0.5</td>
         </tr>
         <tr>
           <td>Hardware MCU</td>
@@ -1971,7 +2118,7 @@ const char UPDATE_HTML[] PROGMEM = R"rawliteral(
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="footer-dot"></span>
-        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.4</span>
+        <span class="footer-title">ARK-BOT SYSTEM &bull; v1.0.5</span>
       </div>
       <div class="footer-credit">
         Designed & Engineered by <span class="author-name">Amuthesan</span>

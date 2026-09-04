@@ -350,6 +350,13 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
+        # Battery Voltage Badge
+        self.lbl_vbat = QLabel("🔋 -- V")
+        self.lbl_vbat.setStyleSheet(
+            "background-color: #1e293b; color: #00f0ff; padding: 5px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 1px solid #334155;"
+        )
+        layout.addWidget(self.lbl_vbat)
+
         # Connection Status Pill
         self.lbl_status_pill = QLabel("DISCONNECTED")
         self.lbl_status_pill.setStyleSheet(
@@ -457,7 +464,21 @@ class MainWindow(QMainWindow):
         # 1. Update 3D viewport kinematics target
         self.viewport.update_telemetry(telem)
 
-        # 2. Sync walk height if provided
+        # 2. Update battery voltage badge
+        if "vbat" in telem:
+            try:
+                vbat = float(telem["vbat"])
+                self.lbl_vbat.setText(f"🔋 {vbat:.2f} V")
+                if vbat < 6.8:
+                    self.lbl_vbat.setStyleSheet("background-color: #450a0a; color: #ef4444; padding: 5px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 1px solid #dc2626;")
+                elif vbat < 7.4:
+                    self.lbl_vbat.setStyleSheet("background-color: #451a03; color: #f59e0b; padding: 5px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 1px solid #d97706;")
+                else:
+                    self.lbl_vbat.setStyleSheet("background-color: #052e16; color: #10b981; padding: 5px 10px; border-radius: 12px; font-weight: bold; font-size: 11px; border: 1px solid #059669;")
+            except (ValueError, TypeError):
+                pass
+
+        # 3. Sync walk height if provided
         if "walk_height" in telem:
             self.commander_panel.update_walk_height(telem["walk_height"])
 

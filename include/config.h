@@ -6,7 +6,8 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v1.0.4"
+#define ROBOT_VERSION     "v1.0.5"
+
 
 // ==========================================
 // Quadruped Physical & Kinematics Dimensions (mm)
@@ -78,6 +79,23 @@ const float STAND_SEAT_SPEED  = 2.0f;
 #else
 #define BUZZER_PIN 21
 #endif
+
+// Seeed Studio Expansion Board Battery Voltage Sense Pin (A0 -> GPIO 0 on XIAO ESP32C6)
+// Connected across 10k / 2.2k voltage divider
+#if defined(A0)
+#define BATTERY_ADC_PIN A0
+#elif defined(D0)
+#define BATTERY_ADC_PIN D0
+#else
+#define BATTERY_ADC_PIN 0
+#endif
+
+// Default Voltage Divider Calibration Multiplier:
+// User Measured: 10.0V source gives 1.974V across divider -> 10.0 / 1.974 = 5.065856f
+#define DEFAULT_BATTERY_MULTIPLIER   5.06586f
+#define BATTERY_LOW_VOLTAGE_ALERT    6.6f      // Low voltage threshold alert in Volts (e.g. 2S/3S)
+#define NVS_KEY_BAT_MULT             "bat_mult"
+
 
 // I2C Addresses
 #define OLED_I2C_ADDRESS    0x3C  // 0.96" SSD1306 OLED (128x64)
