@@ -94,4 +94,24 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
  - **Telemetry Dashboard**: Live connection status, Station IP, SoftAP IP, MAC address, mDNS URL, and system uptime.
  - **Device Management**: Safely restart the ESP32-C6 controller or reset Wi-Fi configuration with automatic reconnection timer.
 
+---
 
+## 🖥️ Python Desktop Companion GUI
+
+A cross-platform desktop application built with **PySide6** and vector graphics for low-latency robot control, live 3D kinematics telemetry, and joint calibration.
+
+### ✨ Features
+- **Dual Connectivity**: Connect via **USB Serial** (`115200` baud auto-streaming) or **Wi-Fi** (HTTP polling at `http://arkbot.local`).
+- **Interactive 3D Kinematics Visualizer**: Real-time vector-rendered 3D viewport of the robot chassis and 4 articulated limbs with orbit, pan, and zoom camera controls.
+- **Locomotion Commander**: D-Pad gait controller, posture switches (Stand/Sit/Stop), gestures (Hand Shake/Wave), and step/speed parameters.
+- **Servo Joint Calibrator**: 12 individual servo angle sliders ($0^\circ-180^\circ$) with live readouts, Center All ($90^\circ$ Neutral), and Master Power toggles.
+- **Diagnostics & Telemetry**: Real-time $(X, Y, Z)$ Cartesian limb matrix, raw servo angle readouts, PCA9685 health, packet rate counter, and serial communication log.
+
+### 🚀 Running the Companion GUI
+```bash
+# 1. Install dependencies
+pip install -r gui/requirements.txt
+
+# 2. Launch application
+python3 gui/run.py
+```

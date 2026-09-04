@@ -6,7 +6,7 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v1.0.1"
+#define ROBOT_VERSION     "v1.0.3"
 
 // ==========================================
 // Quadruped Physical & Kinematics Dimensions (mm)

@@ -782,6 +782,14 @@ void actionTask(void* parameter) {
             } else if (act == "turn_right" || act == "right") {
                 if (!is_stand()) stand();
                 turn_right(req.steps);
+            } else if (act == "turn_180_left" || act == "turn_left_180" || act == "u_turn_left") {
+                if (!is_stand()) stand();
+                currentMode = "TURN 180° LEFT";
+                turn_left(8);
+            } else if (act == "turn_180_right" || act == "turn_right_180" || act == "u_turn_right") {
+                if (!is_stand()) stand();
+                currentMode = "TURN 180° RIGHT";
+                turn_right(8);
             } else if (act == "stand") {
                 stand();
             } else if (act == "sit") {
@@ -817,11 +825,134 @@ void executeAction(const String& act, int steps, float spd) {
 // Serial Command Interface (Nano Bluetooth backwards compatibility)
 // ==========================================
 // w 0 1: stand | w 0 0: sit | w 1 x: fwd | w 2 x: back | w 3 x: right | w 4 x: left | w 5 x: shake | w 6 x: wave
+// ==========================================
+// Serial Telemetry & Command Interface
+// ==========================================
+bool serialTelemetryStream = true;
+
+void sendSerialTelemetryJson() {
+    String s = "{\"t\":";
+    s += String(millis());
+    s += ",\"robot\":\"" ROBOT_NAME "\"";
+    s += ",\"version\":\"" ROBOT_VERSION "\"";
+    s += ",\"pca\":"; s += (pcaReady ? "true" : "false");
+    s += ",\"mode\":\""; s += (pcaReady ? currentMode : "PCA OFFLINE"); s += "\"";
+    s += ",\"moving\":"; s += ((pcaReady && isActionRunning) ? "true" : "false");
+    s += ",\"sites\":[";
+    for (int l = 0; l < NUM_LEGS; l++) {
+        s += "[";
+        s += String(site_now[l][0], 1) + ",";
+        s += String(site_now[l][1], 1) + ",";
+        s += String(site_now[l][2], 1);
+        s += "]";
+        if (l < NUM_LEGS - 1) s += ",";
+    }
+    s += "],\"angles\":[";
+    for (int l = 0; l < NUM_LEGS; l++) {
+        s += "[";
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
+            s += String(currentAngles[l][j]);
+            if (j < SERVOS_PER_LEG - 1) s += ",";
+        }
+        s += "]";
+        if (l < NUM_LEGS - 1) s += ",";
+    }
+    s += "],\"pwr\":[";
+    for (int l = 0; l < NUM_LEGS; l++) {
+        s += "[";
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
+            s += (servoEnabled[l][j] ? "true" : "false");
+            if (j < SERVOS_PER_LEG - 1) s += ",";
+        }
+        s += "]";
+        if (l < NUM_LEGS - 1) s += ",";
+    }
+    s += "]}";
+    Serial.println(s);
+}
+
 void parseSerialCommand(const String& cmd) {
     String trimmed = cmd;
     trimmed.trim();
     if (trimmed.length() == 0) return;
 
+    // 1. Structured JSON Command from Companion GUI
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        // Action command: {"action":"forward","steps":3,"speed":1.0}
+        int actIdx = trimmed.indexOf("\"action\"");
+        if (actIdx >= 0) {
+            int colon = trimmed.indexOf(':', actIdx);
+            int q1 = trimmed.indexOf('"', colon);
+            int q2 = trimmed.indexOf('"', q1 + 1);
+            if (q1 >= 0 && q2 > q1) {
+                String act = trimmed.substring(q1 + 1, q2);
+                int steps = 1;
+                float spd = 1.0f;
+                int stIdx = trimmed.indexOf("\"steps\"");
+                if (stIdx >= 0) {
+                    int c = trimmed.indexOf(':', stIdx);
+                    steps = trimmed.substring(c + 1).toInt();
+                }
+                int spIdx = trimmed.indexOf("\"speed\"");
+                if (spIdx >= 0) {
+                    int c = trimmed.indexOf(':', spIdx);
+                    spd = trimmed.substring(c + 1).toFloat();
+                }
+                executeAction(act, steps, spd);
+                return;
+            }
+        }
+
+        // Servo set: {"servo":{"leg":0,"joint":1,"angle":90}}
+        int srvIdx = trimmed.indexOf("\"servo\"");
+        if (srvIdx >= 0) {
+            int lIdx = trimmed.indexOf("\"leg\"", srvIdx);
+            int jIdx = trimmed.indexOf("\"joint\"", srvIdx);
+            int aIdx = trimmed.indexOf("\"angle\"", srvIdx);
+            if (lIdx >= 0 && jIdx >= 0 && aIdx >= 0) {
+                int leg = trimmed.substring(trimmed.indexOf(':', lIdx) + 1).toInt();
+                int joint = trimmed.substring(trimmed.indexOf(':', jIdx) + 1).toInt();
+                int angle = trimmed.substring(trimmed.indexOf(':', aIdx) + 1).toInt();
+                if (leg >= 0 && leg < NUM_LEGS && joint >= 0 && joint < SERVOS_PER_LEG) {
+                    kinematicsActive = false;
+                    currentAngles[leg][joint] = constrain(angle, 0, 180);
+                    servoEnabled[leg][joint] = true;
+                    setServoAngle(SERVO_CHANNELS[leg][joint], currentAngles[leg][joint]);
+                }
+                return;
+            }
+        }
+
+        // Power set: {"power":{"target":"all","state":1}}
+        int pwrIdx = trimmed.indexOf("\"power\"");
+        if (pwrIdx >= 0) {
+            int stIdx = trimmed.indexOf("\"state\"", pwrIdx);
+            int state = (stIdx >= 0) ? trimmed.substring(trimmed.indexOf(':', stIdx) + 1).toInt() : 1;
+            setMasterPower(state == 1);
+            return;
+        }
+
+        // Center / Init: {"init":"all"}
+        if (trimmed.indexOf("\"init\"") >= 0) {
+            calibrateAllServos(trimmed.indexOf("\"wave\"") >= 0);
+            return;
+        }
+
+        // Stream toggle: {"stream":true/false}
+        int strIdx = trimmed.indexOf("\"stream\"");
+        if (strIdx >= 0) {
+            serialTelemetryStream = (trimmed.indexOf("true", strIdx) >= 0 || trimmed.indexOf("1", strIdx) >= 0);
+            return;
+        }
+
+        // Telemetry request
+        if (trimmed.indexOf("\"telemetry\"") >= 0 || trimmed.indexOf("\"status\"") >= 0) {
+            sendSerialTelemetryJson();
+            return;
+        }
+    }
+
+    // 2. Legacy Nano Bluetooth Protocol ("w <mode> <steps>")
     if (trimmed.startsWith("w ") || trimmed.startsWith("W ")) {
         int firstSpace = trimmed.indexOf(' ');
         int secondSpace = trimmed.indexOf(' ', firstSpace + 1);
@@ -849,6 +980,8 @@ void parseSerialCommand(const String& cmd) {
         executeAction("sit", 1, 1.0f);
     } else if (trimmed.equalsIgnoreCase("stop")) {
         executeAction("stop", 1, 1.0f);
+    } else if (trimmed.equalsIgnoreCase("status") || trimmed.equalsIgnoreCase("telemetry")) {
+        sendSerialTelemetryJson();
     }
 }
 
@@ -952,15 +1085,23 @@ void handleStatus() {
         Serial.println(F("[WARN] PCA9685 disconnected (0x40)"));
     }
 
+    static int cachedRssi = -50;
+    static unsigned long lastRssiCheck = 0;
+    if (millis() - lastRssiCheck >= 2000) {
+        lastRssiCheck = millis();
+        cachedRssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+    }
+
     String json = "{";
     json += "\"robot\":\"" + String(ROBOT_NAME) + "\",";
     json += "\"version\":\"" + String(ROBOT_VERSION) + "\",";
-    json += "\"pcaReady\":" + String(pcaReady ? "true" : "false") + ",";
+    json += "\"pca\":"; json += (pcaReady ? "true" : "false"); json += ",";
+    json += "\"pcaReady\":"; json += (pcaReady ? "true" : "false"); json += ",";
     json += "\"mode\":\"" + (pcaReady ? currentMode : "PCA OFFLINE") + "\",";
     json += "\"moving\":" + String((pcaReady && isActionRunning) ? "true" : "false") + ",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
-    json += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
+    json += "\"rssi\":" + String(cachedRssi) + ",";
     
     // Angles matrix
     json += "\"angles\":[";
@@ -988,6 +1129,17 @@ void handleStatus() {
     json += "],";
 
     // Power matrix
+    json += "\"pwr\":[";
+    for (int l = 0; l < NUM_LEGS; l++) {
+        json += "[";
+        for (int j = 0; j < SERVOS_PER_LEG; j++) {
+            json += String(servoEnabled[l][j] ? "true" : "false");
+            if (j < SERVOS_PER_LEG - 1) json += ",";
+        }
+        json += "]";
+        if (l < NUM_LEGS - 1) json += ",";
+    }
+    json += "],";
     json += "\"enabled\":[";
     for (int l = 0; l < NUM_LEGS; l++) {
         json += "[";
@@ -1001,6 +1153,7 @@ void handleStatus() {
     json += "]}";
 
     server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Connection", "close");
     server.send(200, "application/json", json);
 }
 
@@ -1219,6 +1372,7 @@ void handleReboot() {
 // ==========================================
 void setup() {
     Serial.begin(115200);
+    Serial.setTimeout(5);
 
     initBuzzer();
     initAntenna();
@@ -1339,17 +1493,38 @@ void setup() {
 void loop() {
     server.handleClient();
 
-    // Serial Command Parsing (HC06 Bluetooth & Serial Commander)
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        parseSerialCommand(cmd);
+    // Non-blocking High-Speed Serial Command Parsing
+    static String serialCmdBuf = "";
+    while (Serial.available()) {
+        char c = (char)Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (serialCmdBuf.length() > 0) {
+                parseSerialCommand(serialCmdBuf);
+                serialCmdBuf = "";
+            }
+        } else {
+            if (serialCmdBuf.length() < 256) {
+                serialCmdBuf += c;
+            }
+        }
     }
 
-    // Wi-Fi State monitor
-    bool isConnected = (WiFi.status() == WL_CONNECTED);
-    if (isConnected != wifiStaConnected) {
-        wifiStaConnected = isConnected;
-        activeIp = isConnected ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+    // Wi-Fi State monitor (throttled to 1s to prevent TCP/IP driver stalls)
+    static unsigned long lastWifiCheck = 0;
+    if (millis() - lastWifiCheck >= 1000) {
+        lastWifiCheck = millis();
+        bool isConnected = (WiFi.status() == WL_CONNECTED);
+        if (isConnected != wifiStaConnected) {
+            wifiStaConnected = isConnected;
+            activeIp = isConnected ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+        }
+    }
+
+    // Periodic Serial JSON Telemetry Stream (20Hz / 50ms)
+    static unsigned long lastSerialTelem = 0;
+    if (serialTelemetryStream && (millis() - lastSerialTelem >= 50)) {
+        lastSerialTelem = millis();
+        sendSerialTelemetryJson();
     }
 
     static unsigned long lastOled = 0;
