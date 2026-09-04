@@ -66,19 +66,24 @@ The Seeed Studio XIAO ESP32-C6 features an integrated software-controlled RF swi
 
 ---
 
-## Web UI & Calibration Usage
+## Web UI & Multi-Page Navigation
+ 
+ 1. Power on the robot.
+ 2. Ensure your computer/phone is on the same network (**`AKR Home`**) or connect to the fallback SoftAP (**`ARK-BOT-AP`**, Pass: `12345678`).
+ 3. Open your browser:
+    - **Visual Kinematics Calibrator**: [`http://arkbot.local/calib`](http://arkbot.local/calib) (or root [`http://arkbot.local`](http://arkbot.local) which redirects to `/calib`).
+    - **Wi-Fi & System Setup**: [`http://arkbot.local/setup`](http://arkbot.local/setup).
+    - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx/calib`).
+ 
+ ### 🎯 Visual Calibrator (`/calib`)
+ - **Interactive 3D/2D Simulation**: `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives with smooth LERP mechanical animation.
+ - **Master Power & Alignment**: Master Start/Stop holding torque buttons, Center All ($90^\circ$), and Wave Calibration.
+ - **Individual Joint Power & Sliders**: Independent power toggles and sliders for all 12 leg joints across 4 legs.
+ - **RF Antenna Switcher**: Direct toggle between `📡 Int` (Ceramic) and `🛰️ Ext` (External IPEX) with live RSSI reporting.
+ 
+ ### ⚙️ Wi-Fi & System Setup (`/setup`)
+ - **Wi-Fi Scanner**: One-click 2.4GHz network scan with live signal strength meters, channel numbers, and security modes.
+ - **Credential Configuration**: Quick-select network from scan results, input Wi-Fi password with show/hide toggle, and save to persistent NVS storage across reboots.
+ - **Telemetry Dashboard**: Live connection status, Station IP, SoftAP IP, MAC address, mDNS URL, and system uptime.
+ - **Device Management**: Safely restart the ESP32-C6 controller or reset Wi-Fi configuration with automatic reconnection timer.
 
-1. Power on the robot.
-2. Ensure your computer/phone is on the same network (**`AKR Home`**) or connect to SoftAP (**`ARK-BOT-AP`**, Pass: `12345678`).
-3. Open browser:
-   - Direct: [`http://arkbot.local`](http://arkbot.local)
-   - Or via IP shown on the robot's OLED screen (e.g. `http://192.168.1.xxx`).
-4. **Antenna Controls**: Toggle between `📡 Int` (Internal Ceramic) and `🛰️ Ext` (External IPEX) with live RSSI display.
-5. **Interactive 3D / 2D Visual Simulation**:
-   - `3D Isometric`, `Top-Down`, and `Side Elevation` perspectives.
-   - Smooth mechanical LERP animation with floor shadows and ground contact feedback.
-6. **Servo Power Controls**:
-   - `⚡ Start All Servos`: Energizes all 12 PWM channels.
-   - `🛑 Stop All (Release)`: Sets PWM duty cycle to 0, allowing you to freely adjust horns by hand without motor strain or heat.
-   - Per-leg and individual joint `ON / OFF` power switches.
-   - `🎯 Center All (90°)` and `🌊 Wave Calibration` triggers.

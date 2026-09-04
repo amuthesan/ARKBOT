@@ -6,7 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [v0.1.2] - 2026-09-04
+
+### Added
+- **Dedicated Setup & Wi-Fi Configuration (`/setup`)**:
+  - Available at [`http://arkbot.local/setup`](http://arkbot.local/setup).
+  - One-click **2.4GHz Wi-Fi scanning** with visual RSSI signal bars, security status (WPA/WPA2/WPA3/Open), and channel listing.
+  - Interactive network selector that auto-fills SSID upon clicking a scanned network.
+  - Wi-Fi credentials form with password visibility toggle (show/hide).
+  - Persistent **NVS storage** (`ark_wifi` namespace) for saving custom Wi-Fi network credentials across power cycles.
+  - Connection & system telemetry dashboard: active mode (STA vs SoftAP), assigned Station IP, SoftAP IP, device MAC address, hostname, RSSI, antenna status, and system uptime.
+  - Device management actions: Wi-Fi reconnect, Wi-Fi credentials reset, and controller reboot with automated countdown reconnect overlay.
+- **Dedicated Calibration Route (`/calib`)**:
+  - Calibration page moved from root `/` to [`http://arkbot.local/calib`](http://arkbot.local/calib).
+  - Root route (`/`) automatically redirects (HTTP 302) to `/calib`.
+- **Unified Navigation Header**:
+  - Cyber-themed navigation tabs (`🎯 Calibrator` and `⚙️ Setup`) integrated across all Web UI pages.
+  - Retained RF Antenna toggle widget and live PCA9685/Wi-Fi status badges across pages.
+- **REST API Endpoints**:
+  - `GET /api/wifi/scan`: Discovers nearby Wi-Fi access points and returns JSON list.
+  - `GET /api/wifi/status`: Returns comprehensive network connection status and hardware telemetry.
+  - `POST /api/wifi/save`: Saves new Wi-Fi credentials to NVS and triggers connection.
+  - `POST /api/wifi/reconnect`: Reconnects to configured Wi-Fi network.
+  - `POST /api/wifi/reset`: Clears saved Wi-Fi configuration from NVS.
+  - `POST /api/reboot`: Safely reboots the ESP32-C6 controller.
+
+### Changed
+- Moved visual kinematics calibrator from root `/` to `/calib`.
+- Configured partition table to `min_spiffs.csv` to allocate 1.96MB flash space for multi-page Web UI application.
+
+---
+
 ## [v0.1.1] - 2026-09-02
+
 
 ### Added
 - **Seeed Studio XIAO ESP32-C6 RF Antenna Switching**:

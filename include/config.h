@@ -6,7 +6,8 @@
 // Project Branding & Metadata
 // ==========================================
 #define ROBOT_NAME        "ARK-BOT"
-#define ROBOT_VERSION     "v0.1.1"
+#define ROBOT_VERSION     "v0.1.2"
+
 
 // ==========================================
 // Wi-Fi Configuration (Home Station + SoftAP Fallback)

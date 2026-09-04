@@ -27,6 +27,10 @@ bool useExternalAntenna = false;
 String activeIp = "192.168.4.1";
 String currentMode = "ALL @ 90deg";
 
+// Wi-Fi Persistent Configuration State
+String staSsid = WIFI_STA_SSID;
+String staPass = WIFI_STA_PASS;
+
 // Forward declarations
 void playStepChime();
 void playReadyChime();
@@ -38,6 +42,8 @@ void setServoPower(int leg, int joint, bool enable);
 void setMasterPower(bool enable);
 void setLegPower(int leg, bool enable);
 void calibrateAllServos(bool sequential);
+void loadWifiConfig();
+void connectWifi(const String& ssid, const String& pass, unsigned long timeoutMs = 6000);
 
 // ==========================================
 // Seeed Studio XIAO ESP32-C6 Antenna Control
@@ -45,6 +51,7 @@ void calibrateAllServos(bool sequential);
 void initAntenna() {
     preferences.begin("ark_rf", false);
     useExternalAntenna = preferences.getBool("ext_ant", DEFAULT_EXT_ANT);
+    preferences.end();
     setAntenna(useExternalAntenna, false);
 }
 
@@ -60,12 +67,69 @@ void setAntenna(bool external, bool persist = true) {
     useExternalAntenna = external;
 
     if (persist) {
+        preferences.begin("ark_rf", false);
         preferences.putBool("ext_ant", external);
+        preferences.end();
     }
 
     Serial.printf("[RF] Active Antenna: %s (GPIO14=%s)\n", 
         external ? "EXTERNAL (U.FL / IPEX)" : "INTERNAL (Ceramic)", 
         external ? "HIGH" : "LOW");
+}
+
+// ==========================================
+// Wi-Fi NVS Preferences Storage
+// ==========================================
+void loadWifiConfig() {
+    preferences.begin("ark_wifi", false);
+    staSsid = preferences.getString("ssid", WIFI_STA_SSID);
+    staPass = preferences.getString("pass", WIFI_STA_PASS);
+    preferences.end();
+}
+
+void saveWifiConfig(const String& ssid, const String& pass) {
+    staSsid = ssid;
+    staPass = pass;
+    preferences.begin("ark_wifi", false);
+    preferences.putString("ssid", ssid);
+    preferences.putString("pass", pass);
+    preferences.end();
+    Serial.printf("[NVS] Wi-Fi credentials saved: SSID '%s'\n", ssid.c_str());
+}
+
+void resetWifiConfig() {
+    preferences.begin("ark_wifi", false);
+    preferences.clear();
+    preferences.end();
+    staSsid = WIFI_STA_SSID;
+    staPass = WIFI_STA_PASS;
+    Serial.println(F("[NVS] Wi-Fi credentials reset to defaults."));
+}
+
+void connectWifi(const String& ssid, const String& pass, unsigned long timeoutMs) {
+    Serial.printf("[WiFi] Connecting to '%s' ...\n", ssid.c_str());
+    WiFi.disconnect();
+    delay(100);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+
+    unsigned long startAttempt = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < timeoutMs) {
+        delay(250);
+        Serial.print(F("."));
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiStaConnected = true;
+        activeIp = WiFi.localIP().toString();
+        Serial.printf("[OK] Connected to %s! IP: %s\n", ssid.c_str(), activeIp.c_str());
+        Serial.printf("[OK] Active Antenna: %s, RSSI: %d dBm\n", 
+            useExternalAntenna ? "EXTERNAL" : "INTERNAL", WiFi.RSSI());
+    } else {
+        wifiStaConnected = false;
+        activeIp = WiFi.softAPIP().toString();
+        Serial.println(F("[WARN] Could not connect to Home Wi-Fi. Operating in SoftAP fallback."));
+    }
 }
 
 // ==========================================
@@ -380,15 +444,59 @@ void calibrateAllServos(bool sequential) {
 }
 
 // ==========================================
-// Web Server API Handlers
+// Helpers for JSON and Wi-Fi
+// ==========================================
+String escapeJson(const String& s) {
+    String res = "";
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (c == '"') res += "\\\"";
+        else if (c == '\\') res += "\\\\";
+        else if (c == '\b') res += "\\b";
+        else if (c == '\f') res += "\\f";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else if (c == '\t') res += "\\t";
+        else res += c;
+    }
+    return res;
+}
+
+String getAuthModeName(wifi_auth_mode_t authMode) {
+    switch (authMode) {
+        case WIFI_AUTH_OPEN: return "Open";
+        case WIFI_AUTH_WEP: return "WEP";
+        case WIFI_AUTH_WPA_PSK: return "WPA";
+        case WIFI_AUTH_WPA2_PSK: return "WPA2";
+        case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/WPA2";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Ent";
+        case WIFI_AUTH_WPA3_PSK: return "WPA3";
+        case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
+        default: return "Unknown";
+    }
+}
+
+// ==========================================
+// Web Server API & Page Handlers
 // ==========================================
 void handleRoot() {
-    server.send_P(200, "text/html", INDEX_HTML);
+    // Redirect root to /calib
+    server.sendHeader("Location", "/calib");
+    server.send(302, "text/plain", "Redirecting to /calib...");
+}
+
+void handleCalib() {
+    server.send_P(200, "text/html", CALIB_HTML);
+}
+
+void handleSetup() {
+    server.send_P(200, "text/html", SETUP_HTML);
 }
 
 void handleStatus() {
     String json = "{";
     json += "\"robot\":\"" + String(ROBOT_NAME) + "\",";
+    json += "\"version\":\"" + String(ROBOT_VERSION) + "\",";
     json += "\"pcaReady\":" + String(pcaReady ? "true" : "false") + ",";
     json += "\"mode\":\"" + currentMode + "\",";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
@@ -423,6 +531,88 @@ void handleStatus() {
 
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", json);
+}
+
+void handleWifiScan() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    Serial.println(F("[WiFi] Scanning 2.4GHz Wi-Fi networks..."));
+    
+    int n = WiFi.scanNetworks(false, false);
+    String json = "[";
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) json += ",";
+        json += "{";
+        json += "\"ssid\":\"" + escapeJson(WiFi.SSID(i)) + "\",";
+        json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
+        json += "\"channel\":" + String(WiFi.channel(i)) + ",";
+        json += "\"auth\":\"" + getAuthModeName(WiFi.encryptionType(i)) + "\",";
+        json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED && WiFi.SSID(i) == WiFi.SSID() ? "true" : "false");
+        json += "}";
+    }
+    json += "]";
+    WiFi.scanDelete();
+
+    Serial.printf("[WiFi] Scan complete. Found %d networks.\n", n);
+    server.send(200, "application/json", json);
+}
+
+void handleWifiStatus() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+
+    String json = "{";
+    json += "\"connected\":" + String(isConnected ? "true" : "false") + ",";
+    json += "\"staSsid\":\"" + escapeJson(isConnected ? WiFi.SSID() : staSsid) + "\",";
+    json += "\"staIp\":\"" + (isConnected ? WiFi.localIP().toString() : "") + "\",";
+    json += "\"apSsid\":\"" + String(WIFI_AP_SSID) + "\",";
+    json += "\"apIp\":\"" + WiFi.softAPIP().toString() + "\",";
+    json += "\"mac\":\"" + WiFi.macAddress() + "\",";
+    json += "\"hostname\":\"" + String(MDNS_HOSTNAME) + ".local\",";
+    json += "\"rssi\":" + String(isConnected ? WiFi.RSSI() : 0) + ",";
+    json += "\"extAntenna\":" + String(useExternalAntenna ? "true" : "false") + ",";
+    json += "\"uptime\":" + String(millis() / 1000);
+    json += "}";
+
+    server.send(200, "application/json", json);
+}
+
+void handleWifiSave() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (!server.hasArg("ssid")) {
+        server.send(400, "application/json", "{\"error\":\"Missing 'ssid' parameter\"}");
+        return;
+    }
+
+    String newSsid = server.arg("ssid");
+    String newPass = server.hasArg("pass") ? server.arg("pass") : "";
+
+    saveWifiConfig(newSsid, newPass);
+    playStepChime();
+
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Wi-Fi credentials saved. Connecting...\"}");
+    
+    // Asynchronously begin connection to newly configured network
+    connectWifi(newSsid, newPass, 5000);
+}
+
+void handleWifiReconnect() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Reconnecting to saved Wi-Fi...\"}");
+    connectWifi(staSsid, staPass, 5000);
+}
+
+void handleWifiReset() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    resetWifiConfig();
+    playStepChime();
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Wi-Fi credentials reset to default\"}");
+}
+
+void handleReboot() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Restarting ESP32 controller...\"}");
+    delay(400);
+    ESP.restart();
 }
 
 void handleSetAntenna() {
@@ -522,10 +712,13 @@ void setup() {
     // Initialize Seeed Studio XIAO ESP32-C6 RF Antenna configuration
     initAntenna();
 
+    // Load persistent Wi-Fi configuration from NVS
+    loadWifiConfig();
+
     delay(400);
     Serial.println(F("\n=========================================="));
     Serial.println(F("         ARK-BOT QUADRUPED SYSTEM         "));
-    Serial.println(F("    Visual Calibrator (ESP32-C6 + PCA)    "));
+    Serial.println(F("    Visual Calibrator & Setup (v0.1.2)    "));
     Serial.println(F("=========================================="));
 
     // 1. Initialize Wi-Fi (Connect to Home WiFi + SoftAP Fallback)
@@ -534,33 +727,8 @@ void setup() {
     // Start SoftAP as fallback
     WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL, 0, WIFI_MAX_CONN);
 
-    // Connect to Home Wi-Fi
-    Serial.printf("[WiFi] Connecting to %s ...\n", WIFI_STA_SSID);
-    WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASS);
-
-    // Wait up to 6 seconds for Wi-Fi connection
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 6000) {
-        delay(250);
-        Serial.print(F("."));
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-        wifiStaConnected = true;
-        activeIp = WiFi.localIP().toString();
-        Serial.printf("[OK] Connected to %s!\n", WIFI_STA_SSID);
-        Serial.printf("[OK] Active Antenna: %s, RSSI: %d dBm\n", 
-            useExternalAntenna ? "EXTERNAL" : "INTERNAL", WiFi.RSSI());
-        Serial.print(F("[OK] Home Web UI URL: http://"));
-        Serial.println(activeIp);
-    } else {
-        wifiStaConnected = false;
-        activeIp = WiFi.softAPIP().toString();
-        Serial.println(F("[WARN] Could not connect to Home Wi-Fi. Using SoftAP mode."));
-        Serial.print(F("[OK] SoftAP URL: http://"));
-        Serial.println(activeIp);
-    }
+    // Connect to configured Wi-Fi network
+    connectWifi(staSsid, staPass, 6000);
 
     // Initialize mDNS
     if (MDNS.begin(MDNS_HOSTNAME)) {
@@ -570,7 +738,15 @@ void setup() {
 
     // 2. Configure Web Server Routes
     server.on("/", HTTP_GET, handleRoot);
+    server.on("/calib", HTTP_GET, handleCalib);
+    server.on("/setup", HTTP_GET, handleSetup);
     server.on("/api/status", HTTP_GET, handleStatus);
+    server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
+    server.on("/api/wifi/status", HTTP_GET, handleWifiStatus);
+    server.on("/api/wifi/save", HTTP_POST, handleWifiSave);
+    server.on("/api/wifi/reconnect", HTTP_POST, handleWifiReconnect);
+    server.on("/api/wifi/reset", HTTP_POST, handleWifiReset);
+    server.on("/api/reboot", HTTP_POST, handleReboot);
     server.on("/api/antenna", HTTP_POST, handleSetAntenna);
     server.on("/api/servo", HTTP_POST, handleSetServo);
     server.on("/api/power", HTTP_POST, handlePower);
@@ -611,6 +787,19 @@ void setup() {
 void loop() {
     // Handle incoming Web UI client requests
     server.handleClient();
+
+    // Track Wi-Fi status changes
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+    if (isConnected != wifiStaConnected) {
+        wifiStaConnected = isConnected;
+        if (wifiStaConnected) {
+            activeIp = WiFi.localIP().toString();
+            Serial.printf("[WiFi] Reconnected! IP: %s\n", activeIp.c_str());
+        } else {
+            activeIp = WiFi.softAPIP().toString();
+            Serial.println(F("[WiFi] Disconnected from Station. Using SoftAP."));
+        }
+    }
 
     static unsigned long lastUpdate = 0;
     static bool blinkState = false;
